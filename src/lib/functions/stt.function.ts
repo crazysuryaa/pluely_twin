@@ -25,14 +25,14 @@ async function fetchPluelySTT(audio: File | Blob): Promise<string> {
       audioBase64,
     });
 
-    if (response.success && response.transcription) {
-      return response.transcription;
-    } else {
-      return response.error || "Transcription failed";
+    if (response.success && response.transcription?.trim()) {
+      return response.transcription.trim();
     }
+
+    throw new Error(response.error || "Transcription failed");
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    return `Pluely STT Error: ${errorMessage}`;
+    throw new Error(errorMessage);
   }
 }
 
@@ -228,7 +228,7 @@ export async function fetchSTT(params: STTParams): Promise<string> {
     const transcription = (getByPath(data, path) || "").trim();
 
     if (!transcription) {
-      return [...warnings, "No transcription found"].join("; ");
+      throw new Error("No transcription found");
     }
 
     // Return transcription with any warnings
