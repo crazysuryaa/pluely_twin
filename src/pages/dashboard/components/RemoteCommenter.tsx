@@ -120,7 +120,12 @@ export const RemoteCommenter = () => {
 
     const stopScreenShare = listen<ScreenShareStatus>(
       "remote-screen-share-status",
-      (event) => setScreenShareStatus(event.payload)
+      (event) => {
+        setScreenShareStatus(event.payload);
+        if (event.payload.status === "error" && event.payload.error) {
+          setError(event.payload.error);
+        }
+      }
     );
 
     return () => {
