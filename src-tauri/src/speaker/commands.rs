@@ -38,7 +38,7 @@ impl Default for VadConfig {
             silence_chunks: 55,
             min_speech_chunks: 18,
             pre_speech_chunks: 12,
-            noise_gate_threshold: 0.004
+            noise_gate_threshold: 0.004,
             max_recording_duration_secs: 180, // 3 minutes default
         }
     }
