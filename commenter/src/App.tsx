@@ -274,7 +274,10 @@ export default function App() {
     }, delay);
   }
 
-  function startHeartbeat(socket: WebSocket) {
+  function startHeartbeat(
+    socket: WebSocket,
+    config: ConnectionConfig
+  ) {
     clearHeartbeat();
 
     heartbeatTimerRef.current = window.setInterval(() => {
@@ -286,12 +289,18 @@ export default function App() {
       }
 
       try {
-        socket.send(
-          JSON.stringify({
-            type: "ping",
-            nonce: String(Date.now()),
-          })
-        );
+        if (config.mode === "relay") {
+          // Cloudflare Durable Objects can auto-answer this exact frame
+          // while hibernating, so the session stays cheap and responsive.
+          socket.send("ping");
+        } else {
+          socket.send(
+            JSON.stringify({
+              type: "ping",
+              nonce: String(Date.now()),
+            })
+          );
+        }
       } catch {
         socket.close();
       }
@@ -347,6 +356,17 @@ export default function App() {
     socket.onmessage = (event) => {
       if (socketRef.current !== socket) return;
 
+      if (event.data === "ping") {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send("pong");
+        }
+        return;
+      }
+
+      if (event.data === "pong") {
+        return;
+      }
+
       let message: ServerMessage;
       try {
         message = JSON.parse(event.data) as ServerMessage;
@@ -365,7 +385,7 @@ export default function App() {
             ? "Connected to relay · waiting for Host"
             : "Connected"
         );
-        startHeartbeat(socket);
+        startHeartbeat(socket, config);
         flushPendingComments(socket);
         return;
       }
