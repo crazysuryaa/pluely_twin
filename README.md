@@ -17,6 +17,11 @@ See [UPSTREAM.md](UPSTREAM.md) and [LICENSE](LICENSE).
 
 ## Twin Commenter
 
+Twin Commenter now supports two transports:
+
+- **Worldwide Relay** — Host and Commenter both make outbound WSS connections to a deployed FastAPI relay.
+- **LAN fallback** — direct local WebSocket connection on the same reachable network.
+
 The companion app is designed around a deliberately narrow permission model.
 
 ### Host → Commenter
@@ -50,6 +55,15 @@ If speaker diarization is added later, the same Commenter source can coexist wit
 ## Implemented on `develop`
 
 - complete pinned Pluely v0.1.9 source tree
+- worldwide FastAPI/WSS Twin Relay service
+- role-scoped expiring Host / Commenter JWTs
+- outbound Host relay client with automatic reconnect
+- Commenter worldwide relay-link support
+- Host event acknowledgements + replay after reconnect
+- queued Commenter messages while Host is temporarily offline
+- comment acknowledgement + deduplication
+- explicit relay session revocation when Host presses Stop
+- LAN transport retained as fallback
 - Rust WebSocket remote-commenter service
 - ephemeral session ID and pairing token
 - explicit host Start / Stop controls
@@ -69,6 +83,7 @@ src-tauri/                   Pluely Tauri/Rust backend
 src-tauri/src/remote/        integrated Twin Commenter backend
 
 commenter/                   Twin Commenter desktop app
+relay/                       FastAPI worldwide relay service
 
 host-patch/                  integration reference / patch documentation
 docs/ARCHITECTURE.md         protocol architecture
@@ -79,4 +94,8 @@ UPSTREAM.md                  upstream attribution
 
 Active development is currently on **`develop`**.
 
-The next major feature is the read-only host screen media stream for the Commenter. Structured transcript/AI/comment traffic stays separate from that media channel.
+For worldwide use, deploy `relay/` and enter its HTTPS URL in Dashboard → Twin Commenter → Connection settings.
+
+The first deployment should run a single always-warm relay instance because live sockets and replay buffers are currently process-local. See `relay/README.md`. Horizontal scaling should wait for Redis/pub-sub shared state.
+
+The next major media feature is a consent-based read-only host screen stream. Structured transcript/AI/comment traffic should remain separate from that media channel.
