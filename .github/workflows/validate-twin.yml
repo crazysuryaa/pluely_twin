@@ -72,3 +72,4 @@ jobs:
           pip install -r requirements.txt
           python -m compileall app
           python -c "from app.main import app; print(app.title)"
+          python -m unittest discover -s tests -v
