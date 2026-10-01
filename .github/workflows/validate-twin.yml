@@ -9,6 +9,7 @@ on:
       - "src-tauri/**"
       - "commenter/**"
       - "relay/**"
+      - "cloudflare-relay/**"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/validate-twin.yml"
@@ -66,10 +67,16 @@ jobs:
           npm install
           npm run build
 
-      - name: Validate Twin Relay
+      - name: Validate FastAPI reference relay
         working-directory: relay
         run: |
           pip install -r requirements.txt
           python -m compileall app
           python -c "from app.main import app; print(app.title)"
           python -m unittest discover -s tests -v
+
+      - name: Validate Cloudflare Relay
+        working-directory: cloudflare-relay
+        run: |
+          npm install
+          npm run check
