@@ -143,6 +143,19 @@ export default {
       return jsonResponse({ status: "closed" });
     }
 
+    const mediaWsMatch = path.match(
+      /^\/api\/v1\/ws\/([^/]+)\/media\/(host|commenter)$/,
+    );
+    if (mediaWsMatch) {
+      if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+        return new Response("Expected WebSocket upgrade", { status: 426 });
+      }
+
+      const sessionId = decodeURIComponent(mediaWsMatch[1]);
+      const stub = env.TWIN_SESSIONS.getByName(sessionId);
+      return stub.fetch(request);
+    }
+
     const wsMatch = path.match(
       /^\/api\/v1\/ws\/([^/]+)\/(host|commenter)$/,
     );
