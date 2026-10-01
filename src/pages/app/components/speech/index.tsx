@@ -34,6 +34,7 @@ export const SystemAudio = (props: useSystemAudioType) => {
     isAIProcessing,
     lastTranscription,
     lastAIResponse,
+    remoteComments,
     error,
     setupRequired,
     startCapture,
@@ -351,6 +352,7 @@ export const SystemAudio = (props: useSystemAudioType) => {
                     <ResultsSection
                       lastTranscription={lastTranscription}
                       lastAIResponse={lastAIResponse}
+                      remoteComments={remoteComments}
                       isAIProcessing={isAIProcessing}
                       conversation={conversation}
                       conversationMode={conversationMode}
