@@ -86,3 +86,26 @@ Response includes:
 - copyable `pluely-twin://` connection link
 
 The Host token and Commenter token are role-specific and expire with the session.
+
+
+## GitHub Actions deployment
+
+The repository includes:
+
+```text
+.github/workflows/deploy-relay-cloud-run.yml
+```
+
+Configure these repository or organization secrets before running it:
+
+- `GCP_PROJECT_ID`
+- `GCP_WORKLOAD_IDENTITY_PROVIDER`
+- `GCP_SERVICE_ACCOUNT`
+- `TWIN_RELAY_SECRET_KEY`
+- `TWIN_RELAY_CREATE_KEY`
+
+Then run **Deploy Twin Relay to Cloud Run** from the Actions tab. The workflow
+prints the final Relay URL in its job summary. Paste that URL into the Host
+Dashboard → Twin Commenter → Connection settings.
+
+The create key is intentionally not stored in browser local storage.
