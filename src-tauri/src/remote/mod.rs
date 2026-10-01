@@ -1,4 +1,5 @@
 mod protocol;
+mod relay;
 mod server;
 
 use std::collections::VecDeque;
@@ -34,10 +35,12 @@ struct RemoteInner {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteSessionInfo {
     pub active: bool,
+    pub mode: String,
     pub session_id: String,
     pub token: String,
     pub host: String,
     pub port: u16,
+    pub relay_url: Option<String>,
     pub connection_url: String,
 }
 
@@ -47,25 +50,39 @@ fn discover_lan_host() -> String {
         .unwrap_or_else(|_| "127.0.0.1".to_string())
 }
 
+fn ensure_not_active(state: &State<'_, RemoteState>) -> Result<(), String> {
+    let inner = state
+        .inner
+        .lock()
+        .map_err(|_| "Remote state lock poisoned".to_string())?;
+
+    if inner.task.is_some() {
+        return Err("Remote commenter is already active".to_string());
+    }
+
+    Ok(())
+}
+
+fn new_event_state() -> (
+    broadcast::Sender<SequencedHostEvent>,
+    server::SharedEventHistory,
+) {
+    let (tx, _) = broadcast::channel::<SequencedHostEvent>(512);
+    let history: server::SharedEventHistory =
+        Arc::new(Mutex::new(VecDeque::with_capacity(EVENT_HISTORY_LIMIT)));
+
+    (tx, history)
+}
+
 #[tauri::command]
 pub async fn start_remote_commenter(
     app: AppHandle,
     state: State<'_, RemoteState>,
     port: Option<u16>,
 ) -> Result<RemoteSessionInfo, String> {
+    ensure_not_active(&state)?;
+
     let port = port.unwrap_or(8765);
-
-    {
-        let inner = state
-            .inner
-            .lock()
-            .map_err(|_| "Remote state lock poisoned".to_string())?;
-
-        if inner.task.is_some() {
-            return Err("Remote commenter is already active".to_string());
-        }
-    }
-
     let session_id = Uuid::new_v4().to_string();
     let token = Uuid::new_v4().simple().to_string();
     let bind_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
@@ -80,18 +97,18 @@ pub async fn start_remote_commenter(
         "pluely-twin://connect?host={host}&port={port}&token={token}"
     );
 
-    let (tx, _) = broadcast::channel::<SequencedHostEvent>(512);
-    let history: server::SharedEventHistory =
-        Arc::new(Mutex::new(VecDeque::with_capacity(EVENT_HISTORY_LIMIT)));
+    let (tx, history) = new_event_state();
     let dedupe: server::SharedCommentDedupe =
         Arc::new(Mutex::new(server::CommentDedupe::default()));
 
     let info = RemoteSessionInfo {
         active: true,
+        mode: "lan".to_string(),
         session_id: session_id.clone(),
         token: token.clone(),
         host,
         port,
+        relay_url: None,
         connection_url,
     };
 
@@ -112,7 +129,7 @@ pub async fn start_remote_commenter(
         )
         .await
         {
-            tracing::error!(%error, "Remote commenter server stopped");
+            tracing::error!(%error, "Remote commenter LAN server stopped");
         }
     });
 
@@ -135,6 +152,75 @@ pub async fn start_remote_commenter(
 }
 
 #[tauri::command]
+pub async fn start_remote_commenter_relay(
+    app: AppHandle,
+    state: State<'_, RemoteState>,
+    relay_base_url: String,
+    create_key: Option<String>,
+) -> Result<RemoteSessionInfo, String> {
+    ensure_not_active(&state)?;
+
+    let relay_base_url = relay_base_url.trim().trim_end_matches('/').to_string();
+    if relay_base_url.is_empty() {
+        return Err("Twin relay URL is required".to_string());
+    }
+
+    let relay_session = relay::create_relay_session(
+        &relay_base_url,
+        create_key.as_deref(),
+    )
+    .await?;
+
+    let (tx, history) = new_event_state();
+
+    let info = RemoteSessionInfo {
+        active: true,
+        mode: "relay".to_string(),
+        session_id: relay_session.session_id.clone(),
+        token: relay_session.commenter_token.clone(),
+        host: relay_base_url.clone(),
+        port: 0,
+        relay_url: Some(relay_base_url.clone()),
+        connection_url: relay_session.connection_url.clone(),
+    };
+
+    let app_for_task = app.clone();
+    let relay_for_task = relay_session.clone();
+    let history_for_task = history.clone();
+    let outbound_rx = tx.subscribe();
+
+    let task = tokio::spawn(async move {
+        if let Err(error) = relay::run_host_relay(
+            app_for_task,
+            relay_for_task,
+            outbound_rx,
+            history_for_task,
+        )
+        .await
+        {
+            tracing::error!(%error, "Twin relay host client stopped");
+        }
+    });
+
+    {
+        let mut inner = state
+            .inner
+            .lock()
+            .map_err(|_| "Remote state lock poisoned".to_string())?;
+
+        inner.task = Some(task);
+        inner.outbound = Some(tx);
+        inner.history = Some(history);
+        inner.dedupe = None;
+        inner.next_seq = 0;
+        inner.session = Some(info.clone());
+    }
+
+    let _ = app.emit("remote-commenter-status", &info);
+    Ok(info)
+}
+
+#[tauri::command]
 pub fn stop_remote_commenter(
     app: AppHandle,
     state: State<'_, RemoteState>,
@@ -148,7 +234,6 @@ pub fn stop_remote_commenter(
         task.abort();
     }
 
-    // Dropping the sender closes active connection receivers too.
     inner.outbound = None;
     inner.history = None;
     inner.dedupe = None;
@@ -210,7 +295,7 @@ pub fn publish_host_event(
         }
     }
 
-    // Even with no active viewer the event remains in history for reconnect replay.
+    // The event stays in local history until the transport confirms delivery.
     let _ = tx.send(sequenced);
 
     Ok(())
