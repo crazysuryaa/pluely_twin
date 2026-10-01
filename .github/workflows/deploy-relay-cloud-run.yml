@@ -1,0 +1,72 @@
+name: Deploy Twin Relay to Cloud Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: "Cloud Run region"
+        required: true
+        default: "us-central1"
+      service_name:
+        description: "Cloud Run service name"
+        required: true
+        default: "pluely-twin-relay"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      TWIN_RELAY_SECRET_KEY: ${{ secrets.TWIN_RELAY_SECRET_KEY }}
+      TWIN_RELAY_CREATE_KEY: ${{ secrets.TWIN_RELAY_CREATE_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy relay
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gcloud run deploy "${{ inputs.service_name }}" \
+            --project "$GCP_PROJECT_ID" \
+            --region "${{ inputs.region }}" \
+            --source ./relay \
+            --allow-unauthenticated \
+            --port 8080 \
+            --timeout 3600 \
+            --min-instances 1 \
+            --max-instances 1 \
+            --set-env-vars "TWIN_RELAY_SECRET_KEY=$TWIN_RELAY_SECRET_KEY,TWIN_RELAY_CREATE_KEY=$TWIN_RELAY_CREATE_KEY"
+
+          SERVICE_URL="$(gcloud run services describe "${{ inputs.service_name }}" \
+            --project "$GCP_PROJECT_ID" \
+            --region "${{ inputs.region }}" \
+            --format='value(status.url)')"
+
+          gcloud run services update "${{ inputs.service_name }}" \
+            --project "$GCP_PROJECT_ID" \
+            --region "${{ inputs.region }}" \
+            --update-env-vars "TWIN_RELAY_PUBLIC_URL=$SERVICE_URL"
+
+          {
+            echo "## Twin Relay deployed"
+            echo ""
+            echo "Relay URL: `$SERVICE_URL`"
+            echo ""
+            echo "Keep Cloud Run at max-instances=1 until Redis/shared relay state is implemented."
+          } >> "$GITHUB_STEP_SUMMARY"
