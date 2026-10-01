@@ -1,0 +1,16 @@
+{
+  "name": "pluely-twin-cloudflare-relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "typecheck": "wrangler types && tsc --noEmit",
+    "check": "npm run typecheck && wrangler deploy --dry-run",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "wrangler": "^4.102.0"
+  }
+}
