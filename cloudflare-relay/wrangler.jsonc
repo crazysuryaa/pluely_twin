@@ -17,6 +17,16 @@
       "storage": "sqlite"
     }
   },
+  "ratelimits": [
+    {
+      "name": "SESSION_CREATE_LIMITER",
+      "namespace_id": "10001",
+      "simple": {
+        "limit": 20,
+        "period": 60
+      }
+    }
+  ],
   "vars": {
     "TWIN_RELAY_SESSION_TTL_SECONDS": "28800",
     "TWIN_RELAY_MAX_EVENTS": "5000",
