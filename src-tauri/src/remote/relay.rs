@@ -1,5 +1,5 @@
 use std::collections::{HashSet, VecDeque};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
 use reqwest::Client;
@@ -172,6 +172,7 @@ pub async fn run_host_relay(
 
         let mut heartbeat =
             tokio::time::interval(Duration::from_secs(10));
+        let mut last_pong = Instant::now();
 
         let disconnected = loop {
             tokio::select! {
@@ -186,6 +187,7 @@ pub async fn run_host_relay(
                             }
 
                             if text.as_str() == "pong" {
+                                last_pong = Instant::now();
                                 continue;
                             }
 
@@ -196,6 +198,7 @@ pub async fn run_host_relay(
 
                             match value.get("type").and_then(|item| item.as_str()) {
                                 Some("ping") => {
+                                    last_pong = Instant::now();
                                     if send_json(
                                         &mut sink,
                                         &json!({
@@ -205,6 +208,9 @@ pub async fn run_host_relay(
                                     ).await.is_err() {
                                         break true;
                                     }
+                                }
+                                Some("pong") => {
+                                    last_pong = Instant::now();
                                 }
                                 Some("host_event_accepted") => {
                                     if let Some(seq) = value.get("seq").and_then(Value::as_u64) {
@@ -286,12 +292,18 @@ pub async fn run_host_relay(
                             }
                         }
                         Some(Ok(Message::Ping(payload))) => {
+                            last_pong = Instant::now();
                             if sink.send(Message::Pong(payload)).await.is_err() {
                                 break true;
                             }
                         }
+                        Some(Ok(Message::Pong(_))) => {
+                            last_pong = Instant::now();
+                        }
                         Some(Ok(Message::Close(_))) | None => break true,
-                        Some(Ok(_)) => {}
+                        Some(Ok(_)) => {
+                            last_pong = Instant::now();
+                        }
                         Some(Err(_)) => break true,
                     }
                 }
@@ -323,6 +335,10 @@ pub async fn run_host_relay(
                 }
 
                 _ = heartbeat.tick() => {
+                    if last_pong.elapsed() > Duration::from_secs(35) {
+                        break true;
+                    }
+
                     if sink
                         .send(Message::Text("ping".into()))
                         .await
