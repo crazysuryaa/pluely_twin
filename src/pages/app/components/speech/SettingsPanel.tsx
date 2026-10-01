@@ -29,23 +29,32 @@ import { cn } from "@/lib/utils";
 
 // Sensitivity presets for simpler UX
 const SENSITIVITY_PRESETS = {
-  low: {
-    sensitivity_rms: 0.015,
-    noise_gate_threshold: 0.005,
-    label: "Low",
-    description: "Only picks up clear, loud speech",
+  noisy: {
+    sensitivity_rms: 0.02,
+    peak_threshold: 0.065,
+    noise_gate_threshold: 0.006,
+    min_speech_chunks: 26,
+    silence_chunks: 60,
+    label: "Noisy Room",
+    description: "Rejects more clicks, keyboard noise, and background sound",
   },
-  normal: {
-    sensitivity_rms: 0.012,
-    noise_gate_threshold: 0.003,
-    label: "Normal",
-    description: "Balanced for typical conversations",
+  balanced: {
+    sensitivity_rms: 0.014,
+    peak_threshold: 0.05,
+    noise_gate_threshold: 0.004,
+    min_speech_chunks: 18,
+    silence_chunks: 55,
+    label: "Balanced",
+    description: "Recommended default for normal conversations",
   },
-  high: {
-    sensitivity_rms: 0.008,
-    noise_gate_threshold: 0.002,
-    label: "High",
-    description: "Picks up quieter speech",
+  quiet: {
+    sensitivity_rms: 0.009,
+    peak_threshold: 0.035,
+    noise_gate_threshold: 0.0025,
+    min_speech_chunks: 12,
+    silence_chunks: 50,
+    label: "Quiet Speaker",
+    description: "More sensitive for soft or distant speech",
   },
 } as const;
 
@@ -80,7 +89,8 @@ export const SettingsPanel = ({
       if (
         Math.abs(vadConfig.sensitivity_rms - preset.sensitivity_rms) < 0.001 &&
         Math.abs(vadConfig.noise_gate_threshold - preset.noise_gate_threshold) <
-          0.001
+          0.001 &&
+        vadConfig.min_speech_chunks === preset.min_speech_chunks
       ) {
         return key as SensitivityPreset;
       }
@@ -95,7 +105,10 @@ export const SettingsPanel = ({
     onUpdateVadConfig({
       ...vadConfig,
       sensitivity_rms: presetValues.sensitivity_rms,
+      peak_threshold: presetValues.peak_threshold,
       noise_gate_threshold: presetValues.noise_gate_threshold,
+      min_speech_chunks: presetValues.min_speech_chunks,
+      silence_chunks: presetValues.silence_chunks,
     });
   };
 
@@ -111,12 +124,12 @@ export const SettingsPanel = ({
     const defaultConfig: VadConfig = {
       enabled: vadConfig.enabled, // Keep current mode
       hop_size: 1024,
-      sensitivity_rms: 0.012,
-      peak_threshold: 0.035,
-      silence_chunks: 45,
-      min_speech_chunks: 7,
+      sensitivity_rms: 0.014,
+      peak_threshold: 0.05,
+      silence_chunks: 55,
+      min_speech_chunks: 18,
       pre_speech_chunks: 12,
-      noise_gate_threshold: 0.003,
+      noise_gate_threshold: 0.004,
       max_recording_duration_secs: 180,
     };
     onUpdateVadConfig(defaultConfig);
@@ -315,6 +328,35 @@ export const SettingsPanel = ({
                         step={0.5}
                         className="w-full"
                       />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-xs font-medium flex items-center justify-between">
+                        <span>Minimum Speech</span>
+                        <span className="text-muted-foreground font-normal">
+                          {(
+                            (vadConfig.min_speech_chunks * vadConfig.hop_size) /
+                            44100
+                          ).toFixed(2)}
+                          s
+                        </span>
+                      </Label>
+                      <Slider
+                        value={[vadConfig.min_speech_chunks]}
+                        onValueChange={([value]) =>
+                          onUpdateVadConfig({
+                            ...vadConfig,
+                            min_speech_chunks: Math.round(value),
+                          })
+                        }
+                        min={8}
+                        max={44}
+                        step={2}
+                        className="w-full"
+                      />
+                      <p className="text-[10px] text-muted-foreground">
+                        Higher values reject very short noises and accidental triggers
+                      </p>
                     </div>
 
                     <div className="space-y-2">
