@@ -178,6 +178,17 @@ pub async fn run_host_relay(
                 incoming = source.next() => {
                     match incoming {
                         Some(Ok(Message::Text(text))) => {
+                            if text == "ping" {
+                                if sink.send(Message::Text("pong".into())).await.is_err() {
+                                    break true;
+                                }
+                                continue;
+                            }
+
+                            if text == "pong" {
+                                continue;
+                            }
+
                             let value: Value = match serde_json::from_str(&text) {
                                 Ok(value) => value,
                                 Err(_) => continue,
@@ -312,13 +323,11 @@ pub async fn run_host_relay(
                 }
 
                 _ = heartbeat.tick() => {
-                    if send_json(
-                        &mut sink,
-                        &json!({
-                            "type": "ping",
-                            "nonce": uuid::Uuid::new_v4().to_string(),
-                        }),
-                    ).await.is_err() {
+                    if sink
+                        .send(Message::Text("ping".into()))
+                        .await
+                        .is_err()
+                    {
                         break true;
                     }
                 }
