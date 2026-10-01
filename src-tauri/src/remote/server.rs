@@ -50,17 +50,13 @@ impl CommentDedupe {
 
 pub async fn run_server(
     app: AppHandle,
-    bind_addr: SocketAddr,
+    listener: TcpListener,
     session_id: String,
     token: String,
     outbound: broadcast::Sender<SequencedHostEvent>,
     history: SharedEventHistory,
     dedupe: SharedCommentDedupe,
 ) -> Result<(), String> {
-    let listener = TcpListener::bind(bind_addr)
-        .await
-        .map_err(|e| format!("Failed to bind remote commenter listener: {e}"))?;
-
     loop {
         let (stream, peer) = listener
             .accept()
