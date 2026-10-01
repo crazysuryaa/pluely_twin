@@ -1,4 +1,4 @@
-import { Loader2, XIcon } from "lucide-react";
+import { Loader2, SendIcon, XIcon } from "lucide-react";
 import {
   Popover,
   PopoverContent,
@@ -34,6 +34,7 @@ export const Input = ({
   isHidden,
   keepEngaged,
   setKeepEngaged,
+  submit,
 }: UseCompletionReturn & { isHidden: boolean }) => {
   return (
     <div className="relative flex-1">
@@ -57,16 +58,15 @@ export const Input = ({
               disabled={isLoading || isHidden}
               className={`${
                 currentConversationId && conversationHistory.length > 0
-                  ? "pr-14"
-                  : "pr-2"
+                  ? "pr-20"
+                  : "pr-10"
               }`}
             />
 
-            {/* Conversation thread indicator */}
-            {currentConversationId &&
-              conversationHistory.length > 0 &&
-              !isLoading && (
-                <div className="absolute select-none right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
+            <div className="absolute select-none right-1 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              {currentConversationId &&
+                conversationHistory.length > 0 &&
+                !isLoading && (
                   <MessageHistory
                     conversationHistory={conversationHistory}
                     currentConversationId={currentConversationId}
@@ -74,15 +74,26 @@ export const Input = ({
                     messageHistoryOpen={messageHistoryOpen}
                     setMessageHistoryOpen={setMessageHistoryOpen}
                   />
-                </div>
-              )}
+                )}
 
-            {/* Loading indicator */}
-            {isLoading && (
-              <div className="absolute right-3 top-1/2 -translate-y-1/2 animate-pulse">
-                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-              </div>
-            )}
+              {isLoading ? (
+                <div className="h-7 w-7 flex items-center justify-center animate-pulse">
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => submit()}
+                  disabled={!input.trim() || isHidden}
+                  title="Send"
+                >
+                  <SendIcon className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
           </div>
         </PopoverTrigger>
 
