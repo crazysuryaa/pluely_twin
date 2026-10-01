@@ -7,6 +7,7 @@ import { fetchSTT, fetchAIResponse } from "@/lib/functions";
 import {
   DEFAULT_QUICK_ACTIONS,
   DEFAULT_SYSTEM_PROMPT,
+  MAX_FILES,
   STORAGE_KEYS,
 } from "@/config";
 import {
@@ -83,6 +84,8 @@ export function useSystemAudio() {
   const [isAIProcessing, setIsAIProcessing] = useState(false);
   const [lastTranscription, setLastTranscription] = useState<string>("");
   const [lastAIResponse, setLastAIResponse] = useState<string>("");
+  const [pendingManualQuestion, setPendingManualQuestion] = useState<string>("");
+  const [attachedScreenshots, setAttachedScreenshots] = useState<string[]>([]);
   const [remoteComments, setRemoteComments] = useState<RemoteComment[]>([]);
   const [error, setError] = useState<string>("");
   const [setupRequired, setSetupRequired] = useState<boolean>(false);
@@ -122,6 +125,7 @@ export function useSystemAudio() {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const pendingTranscriptRef = useRef<string>("");
   const pendingTranscriptTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingManualQuestionRef = useRef<string>("");
   const processWithAIRef = useRef<
     ((transcription: string, prompt: string, previousMessages: Message[]) => Promise<void>) | null
   >(null);
@@ -340,7 +344,20 @@ Use this context when relevant. Do not invent facts that are not supported by th
                   ? `${pendingTranscriptRef.current} ${cleanTranscription}`
                   : cleanTranscription;
 
-                setLastTranscription(pendingTranscriptRef.current);
+                const submitMode =
+                  safeLocalStorage.getItem(STORAGE_KEYS.SPEECH_SUBMIT_MODE) ||
+                  "manual";
+
+                if (submitMode === "manual") {
+                  setLastTranscription(
+                    [pendingManualQuestionRef.current, pendingTranscriptRef.current]
+                      .filter(Boolean)
+                      .join(" ")
+                      .trim()
+                  );
+                } else {
+                  setLastTranscription(pendingTranscriptRef.current);
+                }
                 setError("");
 
                 if (pendingTranscriptTimerRef.current) {
@@ -361,6 +378,28 @@ Use this context when relevant. Do not invent facts that are not supported by th
                       text: mergedTranscription,
                     },
                   }).catch(() => {});
+
+                  const submitMode =
+                    safeLocalStorage.getItem(STORAGE_KEYS.SPEECH_SUBMIT_MODE) ||
+                    "manual";
+
+                  if (submitMode === "manual") {
+                    const nextQuestion = [
+                      pendingManualQuestionRef.current,
+                      mergedTranscription,
+                    ]
+                      .filter(Boolean)
+                      .join(" ")
+                      .trim();
+
+                    pendingManualQuestionRef.current = nextQuestion;
+                    setPendingManualQuestion(nextQuestion);
+                    setLastTranscription(nextQuestion);
+                    setIsPopoverOpen(true);
+                    return;
+                  }
+
+                  setLastTranscription(mergedTranscription);
 
                   const effectiveSystemPrompt = buildEffectiveSystemPrompt();
 
@@ -444,6 +483,23 @@ Use this context when relevant. Do not invent facts that are not supported by th
     },
     [useSystemPrompt, saveContextSettings]
   );
+
+  const addScreenshot = useCallback((base64: string) => {
+    setAttachedScreenshots((current) => {
+      if (current.length >= MAX_FILES) return current;
+      return [...current, base64];
+    });
+  }, []);
+
+  const removeScreenshot = useCallback((index: number) => {
+    setAttachedScreenshots((current) =>
+      current.filter((_, itemIndex) => itemIndex !== index)
+    );
+  }, []);
+
+  const clearScreenshots = useCallback(() => {
+    setAttachedScreenshots([]);
+  }, []);
 
   // Quick actions management
   const saveQuickActions = useCallback((actions: string[]) => {
@@ -596,7 +652,7 @@ Use this context when relevant. Do not invent facts that are not supported by th
             systemPrompt: prompt,
             history: previousMessages,
             userMessage: transcription,
-            imagesBase64: [],
+            imagesBase64: attachedScreenshots,
           })) {
             fullResponse += chunk;
             if (isFirstChunk) {
@@ -624,6 +680,8 @@ Use this context when relevant. Do not invent facts that are not supported by th
               text: fullResponse,
             },
           }).catch(() => {});
+
+          setAttachedScreenshots([]);
 
           const timestamp = Date.now();
           setConversation((prev) => ({
@@ -654,10 +712,35 @@ Use this context when relevant. Do not invent facts that are not supported by th
         // No auto-restart - user manually controls when to start next recording
       }
     },
-    [selectedAIProvider, allAiProviders]
+    [selectedAIProvider, allAiProviders, attachedScreenshots]
   );
 
   processWithAIRef.current = processWithAI;
+
+  const submitPendingQuestion = useCallback(async () => {
+    const question = pendingManualQuestionRef.current.trim();
+    if (!question || isAIProcessing) return;
+
+    pendingManualQuestionRef.current = "";
+    setPendingManualQuestion("");
+    setLastTranscription(question);
+
+    const previousMessages = conversation.messages.map((msg) => ({
+      role: msg.role,
+      content: msg.content,
+    }));
+
+    await processWithAI(
+      question,
+      buildEffectiveSystemPrompt(),
+      previousMessages
+    );
+  }, [
+    isAIProcessing,
+    conversation.messages,
+    processWithAI,
+    buildEffectiveSystemPrompt,
+  ]);
 
   const startCapture = useCallback(async () => {
     try {
@@ -904,6 +987,9 @@ Use this context when relevant. Do not invent facts that are not supported by th
       pendingTranscriptTimerRef.current = null;
     }
     pendingTranscriptRef.current = "";
+    pendingManualQuestionRef.current = "";
+    setPendingManualQuestion("");
+    setAttachedScreenshots([]);
 
     setConversation({
       id: generateConversationId("sysaudio"),
@@ -1026,6 +1112,12 @@ Use this context when relevant. Do not invent facts that are not supported by th
     isAIProcessing,
     lastTranscription,
     lastAIResponse,
+    pendingManualQuestion,
+    submitPendingQuestion,
+    attachedScreenshots,
+    addScreenshot,
+    removeScreenshot,
+    clearScreenshots,
     remoteComments,
     error,
     setupRequired,
