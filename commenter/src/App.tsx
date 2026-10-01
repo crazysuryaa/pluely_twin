@@ -7,12 +7,21 @@ type FeedItem = {
   status?: "pending" | "sent";
 };
 
-type ConnectionConfig = {
-  host: string;
-  port: string;
-  token: string;
-  deviceName: string;
-};
+type ConnectionConfig =
+  | {
+      mode: "relay";
+      relayBaseUrl: string;
+      sessionId: string;
+      token: string;
+      deviceName: string;
+    }
+  | {
+      mode: "lan";
+      host: string;
+      port: string;
+      token: string;
+      deviceName: string;
+    };
 
 type HostEvent =
   | { type: "host_status"; remote_active: boolean; session_id: string }
@@ -26,12 +35,17 @@ type ServerMessage =
   | {
       type: "authenticated";
       session_id: string;
-      connection_id: string;
+      connection_id?: string;
       latest_event_seq: number;
+      host_connected?: boolean;
     }
   | { type: "authentication_failed" }
   | { type: "comment_accepted"; comment_id: string }
   | { type: "pong"; nonce?: string | null }
+  | { type: "ping"; nonce?: string | null }
+  | { type: "host_connected" }
+  | { type: "host_disconnected" }
+  | { type: "session_expired" }
   | { type: "error"; message: string }
   | { type: "host_event"; seq: number; event: HostEvent };
 
@@ -50,6 +64,7 @@ export default function App() {
     () => localStorage.getItem(DEVICE_NAME_KEY) || "Twin Commenter"
   );
   const [connected, setConnected] = useState(false);
+  const [hostConnected, setHostConnected] = useState(true);
   const [sessionActive, setSessionActive] = useState(false);
   const [sessionId, setSessionId] = useState("");
   const [status, setStatus] = useState("Disconnected");
@@ -65,6 +80,7 @@ export default function App() {
   const lastEventSeqRef = useRef(0);
   const pendingCommentsRef = useRef<Map<string, string>>(new Map());
   const assistantDraftIdRef = useRef<string | null>(null);
+  const clientConnectionIdRef = useRef(crypto.randomUUID());
 
   useEffect(() => {
     return () => {
@@ -90,7 +106,12 @@ export default function App() {
     }
   }
 
-  function appendFeed(source: string, text: string, id = crypto.randomUUID(), status?: FeedItem["status"]) {
+  function appendFeed(
+    source: string,
+    text: string,
+    id = crypto.randomUUID(),
+    status?: FeedItem["status"]
+  ) {
     const clean = text.trim();
     if (!clean) return;
 
@@ -165,6 +186,16 @@ export default function App() {
     return value;
   }
 
+  function relayWsBase(relayBaseUrl: string) {
+    if (relayBaseUrl.startsWith("https://")) {
+      return relayBaseUrl.replace(/^https:/, "wss:");
+    }
+    if (relayBaseUrl.startsWith("http://")) {
+      return relayBaseUrl.replace(/^http:/, "ws:");
+    }
+    throw new Error("Relay URL must start with http:// or https://");
+  }
+
   function parseConnectionLink(value: string): ConnectionConfig {
     const url = new URL(value.trim());
 
@@ -172,15 +203,33 @@ export default function App() {
       throw new Error("Expected a pluely-twin:// connection link");
     }
 
+    const parsedToken = url.searchParams.get("token")?.trim() || "";
+    if (!parsedToken) {
+      throw new Error("Connection link is missing its session token");
+    }
+
+    const relay = url.searchParams.get("relay")?.trim();
+    const relaySession = url.searchParams.get("session")?.trim();
+
+    if (relay && relaySession) {
+      return {
+        mode: "relay",
+        relayBaseUrl: relay.replace(/\/$/, ""),
+        sessionId: relaySession,
+        token: parsedToken,
+        deviceName: deviceName.trim() || "Twin Commenter",
+      };
+    }
+
     const parsedHost = url.searchParams.get("host")?.trim() || "";
     const parsedPort = url.searchParams.get("port")?.trim() || "8765";
-    const parsedToken = url.searchParams.get("token")?.trim() || "";
 
-    if (!parsedHost || !parsedToken) {
-      throw new Error("Connection link is missing host or token");
+    if (!parsedHost) {
+      throw new Error("Connection link is missing relay/session or LAN host");
     }
 
     return {
+      mode: "lan",
       host: parsedHost,
       port: parsedPort,
       token: parsedToken,
@@ -188,8 +237,16 @@ export default function App() {
     };
   }
 
-  function buildConnectionLink(config: ConnectionConfig) {
+  function buildLanConnectionLink(config: Extract<ConnectionConfig, { mode: "lan" }>) {
     return `pluely-twin://connect?host=${encodeURIComponent(config.host)}&port=${encodeURIComponent(config.port)}&token=${encodeURIComponent(config.token)}`;
+  }
+
+  function websocketUrl(config: ConnectionConfig) {
+    if (config.mode === "relay") {
+      return `${relayWsBase(config.relayBaseUrl)}/api/v1/ws/${encodeURIComponent(config.sessionId)}/commenter`;
+    }
+
+    return `ws://${formatWsHost(config.host)}:${config.port}`;
   }
 
   function scheduleReconnect() {
@@ -198,11 +255,16 @@ export default function App() {
     clearReconnectTimer();
 
     const attempt = reconnectAttemptRef.current;
-    const delay = Math.min(1_000 * 2 ** attempt, MAX_RECONNECT_DELAY_MS);
+    const delay = Math.min(
+      1_000 * 2 ** attempt,
+      MAX_RECONNECT_DELAY_MS
+    );
     reconnectAttemptRef.current = attempt + 1;
 
     setConnected(false);
-    setStatus(`Connection interrupted · reconnecting in ${Math.ceil(delay / 1000)}s`);
+    setStatus(
+      `Connection interrupted · reconnecting in ${Math.ceil(delay / 1000)}s`
+    );
 
     reconnectTimerRef.current = window.setTimeout(() => {
       const config = connectionConfigRef.current;
@@ -216,7 +278,10 @@ export default function App() {
     clearHeartbeat();
 
     heartbeatTimerRef.current = window.setInterval(() => {
-      if (socketRef.current !== socket || socket.readyState !== WebSocket.OPEN) {
+      if (
+        socketRef.current !== socket ||
+        socket.readyState !== WebSocket.OPEN
+      ) {
         return;
       }
 
@@ -262,8 +327,7 @@ export default function App() {
     setSessionActive(true);
     setStatus(reconnecting ? "Reconnecting…" : "Connecting…");
 
-    const wsUrl = `ws://${formatWsHost(config.host)}:${config.port}`;
-    const socket = new WebSocket(wsUrl);
+    const socket = new WebSocket(websocketUrl(config));
     socketRef.current = socket;
 
     socket.onopen = () => {
@@ -274,6 +338,7 @@ export default function App() {
           type: "authenticate",
           token: config.token,
           device_name: config.deviceName || null,
+          connection_id: clientConnectionIdRef.current,
           last_event_seq: lastEventSeqRef.current,
         })
       );
@@ -286,15 +351,20 @@ export default function App() {
       try {
         message = JSON.parse(event.data) as ServerMessage;
       } catch {
-        setStatus("Received an invalid host message");
+        setStatus("Received an invalid relay message");
         return;
       }
 
       if (message.type === "authenticated") {
         reconnectAttemptRef.current = 0;
         setConnected(true);
+        setHostConnected(message.host_connected ?? true);
         setSessionId(message.session_id);
-        setStatus("Connected");
+        setStatus(
+          message.host_connected === false
+            ? "Connected to relay · waiting for Host"
+            : "Connected"
+        );
         startHeartbeat(socket);
         flushPendingComments(socket);
         return;
@@ -305,6 +375,39 @@ export default function App() {
         setConnected(false);
         setSessionActive(false);
         setStatus("Authentication failed");
+        socket.close();
+        return;
+      }
+
+      if (message.type === "ping") {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(
+            JSON.stringify({
+              type: "pong",
+              nonce: message.nonce ?? null,
+            })
+          );
+        }
+        return;
+      }
+
+      if (message.type === "host_connected") {
+        setHostConnected(true);
+        setStatus("Connected");
+        return;
+      }
+
+      if (message.type === "host_disconnected") {
+        setHostConnected(false);
+        setStatus("Connected to relay · Host reconnecting");
+        return;
+      }
+
+      if (message.type === "session_expired") {
+        manualDisconnectRef.current = true;
+        setConnected(false);
+        setSessionActive(false);
+        setStatus("Session expired");
         socket.close();
         return;
       }
@@ -368,37 +471,48 @@ export default function App() {
 
       if (connectionLink.trim()) {
         config = parseConnectionLink(connectionLink);
-        setHost(config.host);
-        setPort(config.port);
-        setToken(config.token);
+
+        if (config.mode === "lan") {
+          setHost(config.host);
+          setPort(config.port);
+          setToken(config.token);
+        }
       } else {
-        config = {
+        const lanConfig: Extract<ConnectionConfig, { mode: "lan" }> = {
+          mode: "lan",
           host: host.trim(),
           port: port.trim() || "8765",
           token: token.trim(),
           deviceName: deviceName.trim() || "Twin Commenter",
         };
 
-        if (!config.host || !config.token) {
-          setStatus("Host and session token are required");
+        if (!lanConfig.host || !lanConfig.token) {
+          setStatus("Paste a connection link or enter LAN host and token");
           return;
         }
 
-        const generatedLink = buildConnectionLink(config);
+        config = lanConfig;
+        const generatedLink = buildLanConnectionLink(lanConfig);
         setConnectionLink(generatedLink);
         localStorage.setItem(SAVED_LINK_KEY, generatedLink);
       }
 
       localStorage.setItem(DEVICE_NAME_KEY, config.deviceName);
-      localStorage.setItem(SAVED_LINK_KEY, buildConnectionLink(config));
+      if (connectionLink.trim()) {
+        localStorage.setItem(SAVED_LINK_KEY, connectionLink.trim());
+      }
 
       lastEventSeqRef.current = 0;
       reconnectAttemptRef.current = 0;
+      clientConnectionIdRef.current = crypto.randomUUID();
       setFeed([]);
       setSessionId("");
+      setHostConnected(true);
       openSocket(config, false);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
+      setStatus(
+        error instanceof Error ? error.message : String(error)
+      );
     }
   }
 
@@ -414,13 +528,14 @@ export default function App() {
       try {
         socket.send(JSON.stringify({ type: "disconnect" }));
       } catch {
-        // Best effort only.
+        // Best effort.
       }
     }
 
     socket?.close();
     connectionConfigRef.current = null;
     setConnected(false);
+    setHostConnected(true);
     setSessionActive(false);
     setSessionId("");
     setStatus("Disconnected");
@@ -472,6 +587,7 @@ export default function App() {
           {sessionId ? (
             <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>
               Session {sessionId.slice(0, 8)}
+              {!hostConnected ? " · Host temporarily offline" : ""}
             </div>
           ) : null}
         </div>
@@ -482,20 +598,36 @@ export default function App() {
       </header>
 
       {!sessionActive ? (
-        <section style={{ display: "grid", gap: 10, marginTop: 20 }}>
+        <section
+          style={{
+            display: "grid",
+            gap: 10,
+            marginTop: 20,
+          }}
+        >
           <label>
             Connection link
             <input
               value={connectionLink}
               onChange={(e) => setConnectionLink(e.target.value)}
-              placeholder="Paste pluely-twin:// connection link"
-              style={{ display: "block", width: "100%", marginTop: 5 }}
+              placeholder="Paste the connection link from the Host"
+              style={{
+                display: "block",
+                width: "100%",
+                marginTop: 5,
+              }}
             />
           </label>
 
           <details>
-            <summary>Manual connection</summary>
-            <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
+            <summary>LAN fallback</summary>
+            <div
+              style={{
+                display: "grid",
+                gap: 10,
+                marginTop: 10,
+              }}
+            >
               <input
                 value={host}
                 onChange={(e) => setHost(e.target.value)}
@@ -521,7 +653,11 @@ export default function App() {
               value={deviceName}
               onChange={(e) => setDeviceName(e.target.value)}
               placeholder="Device name"
-              style={{ display: "block", width: "100%", marginTop: 5 }}
+              style={{
+                display: "block",
+                width: "100%",
+                marginTop: 5,
+              }}
             />
           </label>
 
@@ -538,8 +674,22 @@ export default function App() {
                 borderRadius: 8,
               }}
             >
-              Reconnecting automatically. You can keep typing comments; they will
-              be queued and delivered after the connection returns.
+              Reconnecting automatically. You can keep typing comments; they
+              remain queued until the connection returns.
+            </div>
+          ) : null}
+
+          {connected && !hostConnected ? (
+            <div
+              style={{
+                marginTop: 18,
+                padding: 12,
+                border: "1px solid #444",
+                borderRadius: 8,
+              }}
+            >
+              Relay is connected. The Host is temporarily offline and is
+              reconnecting. Comments remain queued by the relay.
             </div>
           ) : null}
 
@@ -550,14 +700,28 @@ export default function App() {
               </div>
             ) : (
               feed.map((item) => (
-                <article key={item.id} style={{ marginBottom: 14 }}>
+                <article
+                  key={item.id}
+                  style={{ marginBottom: 14 }}
+                >
                   <strong>{item.source}</strong>
                   {item.status === "pending" ? (
-                    <span style={{ marginLeft: 8, fontSize: 11, opacity: 0.6 }}>
+                    <span
+                      style={{
+                        marginLeft: 8,
+                        fontSize: 11,
+                        opacity: 0.6,
+                      }}
+                    >
                       sending…
                     </span>
                   ) : null}
-                  <div style={{ whiteSpace: "pre-wrap", marginTop: 3 }}>
+                  <div
+                    style={{
+                      whiteSpace: "pre-wrap",
+                      marginTop: 3,
+                    }}
+                  >
                     {item.text}
                   </div>
                 </article>
@@ -565,7 +729,10 @@ export default function App() {
             )}
           </section>
 
-          <form onSubmit={sendComment} style={{ display: "grid", gap: 8 }}>
+          <form
+            onSubmit={sendComment}
+            style={{ display: "grid", gap: 8 }}
+          >
             <textarea
               value={comment}
               onChange={(e) => setComment(e.target.value)}
@@ -573,12 +740,19 @@ export default function App() {
               rows={3}
               placeholder={
                 connected
-                  ? "Send a comment to the host…"
+                  ? hostConnected
+                    ? "Send a comment to the Host…"
+                    : "Host is reconnecting — comment will remain queued…"
                   : "Connection is recovering — comment will be queued…"
               }
             />
-            <button type="submit" disabled={!comment.trim()}>
-              {connected ? "Send comment" : "Queue comment"}
+            <button
+              type="submit"
+              disabled={!comment.trim()}
+            >
+              {connected && hostConnected
+                ? "Send comment"
+                : "Queue comment"}
             </button>
           </form>
         </>
