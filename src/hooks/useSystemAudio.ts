@@ -126,6 +126,26 @@ export function useSystemAudio() {
     ((transcription: string, prompt: string, previousMessages: Message[]) => Promise<void>) | null
   >(null);
 
+  const buildEffectiveSystemPrompt = useCallback(() => {
+    const parts: string[] = [];
+
+    if (useSystemPrompt) {
+      parts.push(systemPrompt || DEFAULT_SYSTEM_PROMPT);
+    }
+
+    const sessionContext = contextContent.trim();
+    if (sessionContext) {
+      parts.push(
+        `SESSION CONTEXT / EVIDENCE:
+${sessionContext}
+
+Use this context when relevant. Do not invent facts that are not supported by the conversation or supplied context.`
+      );
+    }
+
+    return parts.length > 0 ? parts.join("\n\n") : DEFAULT_SYSTEM_PROMPT;
+  }, [useSystemPrompt, systemPrompt, contextContent]);
+
   useEffect(() => {
     let remoteCommentUnlisten: (() => void) | undefined;
 
@@ -342,9 +362,7 @@ export function useSystemAudio() {
                     },
                   }).catch(() => {});
 
-                  const effectiveSystemPrompt = useSystemPrompt
-                    ? systemPrompt || DEFAULT_SYSTEM_PROMPT
-                    : contextContent || DEFAULT_SYSTEM_PROMPT;
+                  const effectiveSystemPrompt = buildEffectiveSystemPrompt();
 
                   const previousMessages = conversation.messages.map((msg) => ({
                     role: msg.role,
@@ -389,6 +407,7 @@ export function useSystemAudio() {
     useSystemPrompt,
     systemPrompt,
     contextContent,
+    buildEffectiveSystemPrompt,
   ]);
 
   // Context management functions
@@ -461,9 +480,7 @@ export function useSystemAudio() {
   const handleQuickActionClick = async (action: string) => {
     setError("");
 
-    const effectiveSystemPrompt = useSystemPrompt
-      ? systemPrompt || DEFAULT_SYSTEM_PROMPT
-      : contextContent || DEFAULT_SYSTEM_PROMPT;
+    const effectiveSystemPrompt = buildEffectiveSystemPrompt();
 
     // Include the most recent transcription in conversation history if it exists
     let updatedMessages = [...conversation.messages];
