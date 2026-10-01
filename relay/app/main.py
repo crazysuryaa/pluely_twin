@@ -111,6 +111,35 @@ async def create_session(
     }
 
 
+@app.post("/api/v1/sessions/{session_id}/close")
+async def close_session(
+    session_id: str,
+    authorization: str | None = Header(default=None),
+) -> dict[str, str]:
+    token = ""
+    if authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+
+    if not _valid_token(token, session_id, "host"):
+        raise HTTPException(status_code=401, detail="Invalid Host token")
+
+    session = await manager.remove_session(session_id)
+    if session is None:
+        return {"status": "already_closed"}
+
+    await _close_quietly(session.host, 1000, "Session closed by Host")
+    for commenter in list(session.commenters.values()):
+        with suppress(Exception):
+            await commenter.websocket.send_json({"type": "session_expired"})
+        await _close_quietly(
+            commenter.websocket,
+            1000,
+            "Session closed by Host",
+        )
+
+    return {"status": "closed"}
+
+
 def _valid_token(token: str, session_id: str, role: str) -> bool:
     payload = decode_session_token(settings.secret_key, token)
     return bool(
