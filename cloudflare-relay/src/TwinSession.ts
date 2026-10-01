@@ -2,9 +2,12 @@ import { DurableObject } from "cloudflare:workers";
 import { verifySessionToken, type SessionRole } from "./auth";
 import { intEnv, type Env } from "./env";
 
+type SocketChannel = "control" | "media";
+
 type SocketAttachment = {
   authenticated: boolean;
   expectedRole: SessionRole;
+  channel: SocketChannel;
   role?: SessionRole;
   connectionId: string;
   deviceName?: string | null;
@@ -131,6 +134,9 @@ export class TwinSession extends DurableObject<Env> {
     const expectedRole: SessionRole = url.pathname.endsWith("/host")
       ? "host"
       : "commenter";
+    const channel: SocketChannel = url.pathname.includes("/media/")
+      ? "media"
+      : "control";
 
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
@@ -140,6 +146,7 @@ export class TwinSession extends DurableObject<Env> {
     const attachment: SocketAttachment = {
       authenticated: false,
       expectedRole,
+      channel,
       connectionId: crypto.randomUUID(),
       deviceName: null,
       lastEventSeq: 0,
@@ -157,10 +164,32 @@ export class TwinSession extends DurableObject<Env> {
     message: string | ArrayBuffer,
   ): Promise<void> {
     if (typeof message !== "string") {
-      this.sendJson(ws, {
-        type: "error",
-        message: "Binary messages are not supported",
-      });
+      const attachment =
+        ws.deserializeAttachment() as SocketAttachment | null;
+
+      if (
+        !attachment?.authenticated ||
+        attachment.channel !== "media" ||
+        attachment.role !== "host"
+      ) {
+        return;
+      }
+
+      if (message.byteLength > 2_000_000) {
+        this.sendJson(ws, {
+          type: "error",
+          message: "Screen frame exceeds 2 MB",
+        });
+        return;
+      }
+
+      for (const viewer of this.getSocketsByRole("commenter", "media")) {
+        try {
+          viewer.send(message);
+        } catch {
+          // Viewer reconnect logic handles dead media sockets.
+        }
+      }
       return;
     }
 
@@ -184,6 +213,7 @@ export class TwinSession extends DurableObject<Env> {
       (ws.deserializeAttachment() as SocketAttachment | null) ?? {
         authenticated: false,
         expectedRole: "commenter",
+        channel: "control",
         connectionId: crypto.randomUUID(),
         deviceName: null,
         lastEventSeq: 0,
@@ -191,6 +221,21 @@ export class TwinSession extends DurableObject<Env> {
 
     if (!attachment.authenticated) {
       await this.authenticateSocket(ws, attachment, value);
+      return;
+    }
+
+    if (attachment.channel === "media") {
+      // Media sockets only accept authentication plus heartbeat/status traffic.
+      if (attachment.role === "host" && value.type === "screen_status") {
+        this.broadcastToRole(
+          "commenter",
+          {
+            type: "screen_status",
+            state: value.state === "stopped" ? "stopped" : "started",
+          },
+          "media",
+        );
+      }
       return;
     }
 
@@ -211,20 +256,36 @@ export class TwinSession extends DurableObject<Env> {
       ws.deserializeAttachment() as SocketAttachment | null;
 
     if (attachment?.authenticated) {
-      if (attachment.role === "host") {
-        const replacementHostExists = this.getSocketsByRole("host").some(
+      if (attachment.channel === "media") {
+        if (attachment.role === "host") {
+          this.broadcastToRole(
+            "commenter",
+            { type: "screen_status", state: "stopped" },
+            "media",
+          );
+        }
+      } else if (attachment.role === "host") {
+        const replacementHostExists = this.getSocketsByRole("host", "control").some(
           (candidate) => candidate !== ws,
         );
 
         if (!replacementHostExists) {
-          this.broadcastToRole("commenter", { type: "host_disconnected" });
+          this.broadcastToRole(
+            "commenter",
+            { type: "host_disconnected" },
+            "control",
+          );
         }
       } else {
-        this.broadcastToRole("host", {
-          type: "commenter_disconnected",
-          connection_id: attachment.connectionId,
-          device_name: attachment.deviceName ?? null,
-        });
+        this.broadcastToRole(
+          "host",
+          {
+            type: "commenter_disconnected",
+            connection_id: attachment.connectionId,
+            device_name: attachment.deviceName ?? null,
+          },
+          "control",
+        );
       }
     }
 
@@ -241,20 +302,39 @@ export class TwinSession extends DurableObject<Env> {
 
     if (!attachment?.authenticated) return;
 
+    if (attachment.channel === "media") {
+      if (attachment.role === "host") {
+        this.broadcastToRole(
+          "commenter",
+          { type: "screen_status", state: "stopped" },
+          "media",
+        );
+      }
+      return;
+    }
+
     if (attachment.role === "host") {
-      const replacementHostExists = this.getSocketsByRole("host").some(
+      const replacementHostExists = this.getSocketsByRole("host", "control").some(
         (candidate) => candidate !== ws,
       );
 
       if (!replacementHostExists) {
-        this.broadcastToRole("commenter", { type: "host_disconnected" });
+        this.broadcastToRole(
+          "commenter",
+          { type: "host_disconnected" },
+          "control",
+        );
       }
     } else {
-      this.broadcastToRole("host", {
-        type: "commenter_disconnected",
-        connection_id: attachment.connectionId,
-        device_name: attachment.deviceName ?? null,
-      });
+      this.broadcastToRole(
+        "host",
+        {
+          type: "commenter_disconnected",
+          connection_id: attachment.connectionId,
+          device_name: attachment.deviceName ?? null,
+        },
+        "control",
+      );
     }
   }
 
@@ -342,13 +422,17 @@ export class TwinSession extends DurableObject<Env> {
       authenticated: true,
       expectedRole: attachment.expectedRole,
       role: attachment.expectedRole,
+      channel: attachment.channel,
       connectionId,
       deviceName,
       lastEventSeq,
     };
 
-    if (attachment.expectedRole === "host") {
-      for (const existing of this.getSocketsByRole("host")) {
+    if (
+      attachment.expectedRole === "host" &&
+      attachment.channel === "control"
+    ) {
+      for (const existing of this.getSocketsByRole("host", "control")) {
         if (existing !== ws) {
           try {
             existing.close(1000, "Replaced by newer Host connection");
@@ -366,19 +450,38 @@ export class TwinSession extends DurableObject<Env> {
       session_id: meta.session_id,
       connection_id: connectionId,
       latest_event_seq: this.latestEventSeq(),
-      host_connected: this.getSocketsByRole("host").length > 0,
+      host_connected: this.getSocketsByRole("host", "control").length > 0,
     });
+
+    if (attachment.channel === "media") {
+      if (attachment.expectedRole === "host") {
+        this.broadcastToRole(
+          "commenter",
+          { type: "screen_status", state: "started" },
+          "media",
+        );
+      }
+      return;
+    }
 
     if (attachment.expectedRole === "commenter") {
       await this.replayEvents(ws, lastEventSeq);
 
-      this.broadcastToRole("host", {
-        type: "commenter_connected",
-        connection_id: connectionId,
-        device_name: deviceName,
-      });
+      this.broadcastToRole(
+        "host",
+        {
+          type: "commenter_connected",
+          connection_id: connectionId,
+          device_name: deviceName,
+        },
+        "control",
+      );
     } else {
-      this.broadcastToRole("commenter", { type: "host_connected" });
+      this.broadcastToRole(
+        "commenter",
+        { type: "host_connected" },
+        "control",
+      );
       this.flushPendingCommentsToHost(ws);
     }
   }
@@ -428,11 +531,15 @@ export class TwinSession extends DurableObject<Env> {
 
         this.trimEvents();
 
-        this.broadcastToRole("commenter", {
-          type: "host_event",
-          seq,
-          event,
-        });
+        this.broadcastToRole(
+          "commenter",
+          {
+            type: "host_event",
+            seq,
+            event,
+          },
+          "control",
+        );
       }
 
       // ACK duplicate/replayed events too.
@@ -558,12 +665,16 @@ export class TwinSession extends DurableObject<Env> {
 
     this.trimPendingComments();
 
-    this.broadcastToRole("host", {
-      type: "comment",
-      comment_id: commentId,
-      text,
-      device_name: attachment.deviceName ?? null,
-    });
+    this.broadcastToRole(
+      "host",
+      {
+        type: "comment",
+        comment_id: commentId,
+        text,
+        device_name: attachment.deviceName ?? null,
+      },
+      "control",
+    );
   }
 
   private async replayEvents(
@@ -691,11 +802,18 @@ export class TwinSession extends DurableObject<Env> {
     }
   }
 
-  private getSocketsByRole(role: SessionRole): WebSocket[] {
+  private getSocketsByRole(
+    role: SessionRole,
+    channel: SocketChannel = "control",
+  ): WebSocket[] {
     return this.ctx.getWebSockets().filter((ws) => {
       const attachment =
         ws.deserializeAttachment() as SocketAttachment | null;
-      return attachment?.authenticated && attachment.role === role;
+      return (
+        attachment?.authenticated &&
+        attachment.role === role &&
+        attachment.channel === channel
+      );
     });
   }
 
@@ -709,6 +827,7 @@ export class TwinSession extends DurableObject<Env> {
 
       if (
         attachment?.authenticated &&
+        attachment.channel === "control" &&
         attachment.connectionId === connectionId
       ) {
         this.sendJson(ws, payload);
@@ -719,8 +838,9 @@ export class TwinSession extends DurableObject<Env> {
   private broadcastToRole(
     role: SessionRole,
     payload: unknown,
+    channel: SocketChannel = "control",
   ): void {
-    for (const ws of this.getSocketsByRole(role)) {
+    for (const ws of this.getSocketsByRole(role, channel)) {
       this.sendJson(ws, payload);
     }
   }
