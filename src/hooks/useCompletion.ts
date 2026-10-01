@@ -824,6 +824,35 @@ export const useCompletion = () => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isPopoverOpen, scrollAreaRef]);
 
+  // Global shortcut: scroll only the Pluely chat viewport.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const setupScrollShortcut = async () => {
+      unlisten = await listen<{ direction: "up" | "down" }>(
+        "scroll-chat",
+        (event) => {
+          if (!isPopoverOpen) return;
+
+          const scrollElement = scrollAreaRef.current?.querySelector(
+            "[data-radix-scroll-area-viewport]"
+          ) as HTMLElement | null;
+
+          if (!scrollElement) return;
+
+          const amount = event.payload.direction === "down" ? 180 : -180;
+          scrollElement.scrollBy({ top: amount, behavior: "smooth" });
+        }
+      );
+    };
+
+    void setupScrollShortcut();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [isPopoverOpen]);
+
   // Keyboard shortcut for toggling keep engaged mode (Cmd+K / Ctrl+K)
   useEffect(() => {
     const handleToggleShortcut = (e: KeyboardEvent) => {
