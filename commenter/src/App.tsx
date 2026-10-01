@@ -77,6 +77,7 @@ export default function App() {
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<number | null>(null);
   const heartbeatTimerRef = useRef<number | null>(null);
+  const lastPongAtRef = useRef(Date.now());
   const lastEventSeqRef = useRef(0);
   const pendingCommentsRef = useRef<Map<string, string>>(new Map());
   const assistantDraftIdRef = useRef<string | null>(null);
@@ -280,11 +281,18 @@ export default function App() {
   ) {
     clearHeartbeat();
 
+    lastPongAtRef.current = Date.now();
+
     heartbeatTimerRef.current = window.setInterval(() => {
       if (
         socketRef.current !== socket ||
         socket.readyState !== WebSocket.OPEN
       ) {
+        return;
+      }
+
+      if (Date.now() - lastPongAtRef.current > 35_000) {
+        socket.close();
         return;
       }
 
@@ -355,6 +363,8 @@ export default function App() {
 
     socket.onmessage = (event) => {
       if (socketRef.current !== socket) return;
+
+      lastPongAtRef.current = Date.now();
 
       if (event.data === "ping") {
         if (socket.readyState === WebSocket.OPEN) {
