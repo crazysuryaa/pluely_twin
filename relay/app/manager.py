@@ -110,6 +110,10 @@ class RelayManager:
 
             return session
 
+    async def remove_session(self, session_id: str) -> RelaySession | None:
+        async with self._lock:
+            return self._sessions.pop(session_id, None)
+
     async def remove_expired(self) -> list[RelaySession]:
         now = time.time()
         async with self._lock:
