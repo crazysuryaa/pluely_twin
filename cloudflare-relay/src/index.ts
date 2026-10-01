@@ -1,5 +1,4 @@
 import {
-  constantTimeEqual,
   signSessionToken,
   verifySessionToken,
 } from "./auth";
@@ -47,12 +46,26 @@ export default {
     }
 
     if (path === "/api/v1/sessions" && request.method === "POST") {
-      const expectedCreateKey = env.TWIN_RELAY_CREATE_KEY?.trim() ?? "";
-      if (expectedCreateKey) {
-        const supplied = request.headers.get("X-Relay-Create-Key") ?? "";
-        if (!constantTimeEqual(supplied, expectedCreateKey)) {
-          return jsonResponse({ detail: "Invalid relay create key" }, 401);
-        }
+      // Distributed Host binaries create sessions without a shared permanent
+      // secret. Cloudflare applies a generous per-network creation limit to
+      // reduce accidental or basic automated abuse.
+      const actor =
+        request.headers.get("CF-Connecting-IP")?.trim() || "unknown";
+      const { success } = await env.SESSION_CREATE_LIMITER.limit({
+        key: `session-create:${actor}`,
+      });
+
+      if (!success) {
+        return Response.json(
+          { detail: "Too many session creation requests. Try again shortly." },
+          {
+            status: 429,
+            headers: {
+              "Cache-Control": "no-store",
+              "Retry-After": "60",
+            },
+          },
+        );
       }
 
       if (!env.TWIN_RELAY_SECRET_KEY?.trim()) {
