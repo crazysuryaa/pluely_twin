@@ -1056,6 +1056,35 @@ Use this context when relevant. Do not invent facts that are not supported by th
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isPopoverOpen]);
 
+  // Global shortcut: scroll only the Pluely chat viewport.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+
+    const setupScrollShortcut = async () => {
+      unlisten = await listen<{ direction: "up" | "down" }>(
+        "scroll-chat",
+        (event) => {
+          if (!isPopoverOpen) return;
+
+          const scrollElement = scrollAreaRef.current?.querySelector(
+            "[data-radix-scroll-area-viewport]"
+          ) as HTMLElement | null;
+
+          if (!scrollElement) return;
+
+          const amount = event.payload.direction === "down" ? 180 : -180;
+          scrollElement.scrollBy({ top: amount, behavior: "smooth" });
+        }
+      );
+    };
+
+    void setupScrollShortcut();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [isPopoverOpen]);
+
   // Keyboard shortcuts for continuous mode recording (local shortcuts)
   useEffect(() => {
     const handleRecordingShortcuts = (e: KeyboardEvent) => {
