@@ -99,3 +99,15 @@ For worldwide use, deploy `relay/` and enter its HTTPS URL in Dashboard → Twin
 The first deployment should run a single always-warm relay instance because live sockets and replay buffers are currently process-local. See `relay/README.md`. Horizontal scaling should wait for Redis/pub-sub shared state.
 
 The next major media feature is a consent-based read-only host screen stream. Structured transcript/AI/comment traffic should remain separate from that media channel.
+
+
+### Worldwide session flow
+
+1. Deploy `relay/` and copy its HTTPS service URL.
+2. In the Host dashboard, open **Twin Commenter → Connection settings** and enter the Relay URL.
+3. Press **Start Worldwide Session**.
+4. Press **Copy Connection Link**.
+5. Paste that link into the Twin Commenter app on the other computer.
+6. Both apps connect outbound to the relay and recover automatically from ordinary network interruptions.
+
+The copied link contains a short-lived Commenter credential. Treat it like a temporary invitation and stop the Host session when it is no longer needed.
