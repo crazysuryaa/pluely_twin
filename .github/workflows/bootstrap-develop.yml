@@ -1,0 +1,66 @@
+name: Bootstrap develop from Pluely v0.1.9
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/bootstrap-develop.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  import-upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout develop branch
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - name: Fetch pinned Pluely source
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/pluely-upstream
+          git clone https://github.com/iamsrikanthnani/pluely.git /tmp/pluely-upstream
+          git -C /tmp/pluely-upstream checkout 4fb23ac348ad087ef22920272012030398b6b155
+
+      - name: Import source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rsync -a --delete \
+            --exclude='.git' \
+            --exclude='.github/workflows/' \
+            /tmp/pluely-upstream/ ./
+
+          cat > UPSTREAM.md <<'EOF'
+          # Upstream attribution
+
+          This repository is based on the last publicly available open-source Pluely source snapshot.
+
+          - Upstream: https://github.com/iamsrikanthnani/pluely
+          - Pinned commit: `4fb23ac348ad087ef22920272012030398b6b155`
+          - Release: v0.1.9
+          - Source date: 2026-01-14
+          - License: GNU GPL v3
+
+          Twin Commenter changes are maintained separately from the pinned upstream baseline.
+          EOF
+
+      - name: Commit imported source to develop
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No source changes to commit."
+            exit 0
+          fi
+          git commit -m "chore: import pinned Pluely v0.1.9 source"
+          git push origin develop
