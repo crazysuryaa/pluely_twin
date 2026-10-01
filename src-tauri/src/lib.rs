@@ -118,6 +118,7 @@ pub fn run() {
             speaker::get_input_devices,
             speaker::get_output_devices,
             remote::start_remote_commenter,
+            remote::start_remote_commenter_relay,
             remote::stop_remote_commenter,
             remote::get_remote_commenter_status,
             remote::publish_host_event,
