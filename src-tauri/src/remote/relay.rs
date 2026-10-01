@@ -150,7 +150,7 @@ pub async fn run_host_relay(
         let auth_value: Value = serde_json::from_str(&auth_text)
             .map_err(|e| format!("Invalid relay authentication response: {e}"))?;
 
-        if auth_value.get("type").and_then(Value::as_str) != Some("authenticated") {
+        if auth_value.get("type").and_then(|item| item.as_str()) != Some("authenticated") {
             return Err(format!("Relay rejected Host authentication: {auth_value}"));
         }
 
