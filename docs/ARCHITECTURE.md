@@ -53,8 +53,11 @@ The Host calls:
 
 ```text
 POST /api/v1/sessions
-X-Relay-Create-Key: <optional deployment key>
 ```
+
+No permanent client secret is embedded in distributed Host binaries. Cloudflare
+rate-limits session creation, and every successful creation returns fresh,
+role-scoped, short-lived credentials.
 
 The relay returns:
 
