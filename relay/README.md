@@ -59,9 +59,10 @@ implementation without adding shared state/pub-sub.
 
 ## Session creation
 
+By default, local/reference deployments do not require a create key:
+
 ```http
 POST /api/v1/sessions
-X-Relay-Create-Key: <private create key>
 ```
 
 The response includes:
