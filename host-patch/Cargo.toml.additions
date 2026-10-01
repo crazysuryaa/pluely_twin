@@ -1,0 +1,2 @@
+# Add under [dependencies] in src-tauri/Cargo.toml
+tokio-tungstenite = "0.24"

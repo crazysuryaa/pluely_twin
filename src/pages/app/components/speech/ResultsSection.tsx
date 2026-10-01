@@ -1,0 +1,243 @@
+import { ChatConversation } from "@/types";
+import { Button, Markdown, Switch, CopyButton } from "@/components";
+import { BotIcon, HeadphonesIcon, Loader2, SendIcon, SparklesIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+type Props = {
+  lastTranscription: string;
+  lastAIResponse: string;
+  pendingManualQuestion: string;
+  onSubmitPending: () => Promise<void>;
+  remoteComments: Array<{
+    id: string;
+    text: string;
+    device_name?: string | null;
+  }>;
+  isAIProcessing: boolean;
+  conversation: ChatConversation;
+  conversationMode: boolean;
+  setConversationMode: (mode: boolean) => void;
+};
+
+export const ResultsSection = ({
+  lastTranscription,
+  lastAIResponse,
+  pendingManualQuestion,
+  onSubmitPending,
+  remoteComments,
+  isAIProcessing,
+  conversation,
+  conversationMode,
+  setConversationMode,
+}: Props) => {
+  const hasResponse = lastAIResponse || isAIProcessing;
+  const hasHistory = conversation.messages.length > 2;
+
+  if (!hasResponse && !lastTranscription && remoteComments.length === 0) {
+    return null;
+  }
+
+  const isMac = navigator.platform.toLowerCase().includes("mac");
+  const modKey = isMac ? "⌘" : "Ctrl";
+
+  return (
+    <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-3">
+      {/* Header with toggle */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <SparklesIcon className="w-3.5 h-3.5 text-primary" />
+          <h4 className="text-xs font-medium">
+            {conversationMode ? "Conversation" : "AI Response"}
+          </h4>
+        </div>
+        <div className="flex items-center gap-2 select-none">
+          <span className="text-[9px] text-muted-foreground/50 bg-muted/50 px-1 rounded">
+            {modKey}+K
+          </span>
+          <Switch
+            checked={conversationMode}
+            onCheckedChange={setConversationMode}
+            className="scale-75"
+          />
+          {lastAIResponse && <CopyButton content={lastAIResponse} />}
+        </div>
+      </div>
+
+      {/* RESPONSE MODE: System as text, then AI response */}
+      {!conversationMode && (
+        <div className="space-y-2">
+          {/* System Input - Just text with bold label */}
+          {lastTranscription && (
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-[11px] text-muted-foreground flex-1">
+                <span className="font-semibold">System:</span> {lastTranscription}
+              </p>
+              {pendingManualQuestion && (
+                <Button
+                  size="sm"
+                  className="h-7 text-[10px] gap-1 px-2 shrink-0"
+                  onClick={() => void onSubmitPending()}
+                  disabled={isAIProcessing}
+                  title="Send detected speech to AI"
+                >
+                  <SendIcon className="h-3 w-3" />
+                  Send
+                </Button>
+              )}
+            </div>
+          )}
+
+          {remoteComments.length > 0 && (
+            <div className="space-y-1.5">
+              {remoteComments.slice(-5).map((comment) => (
+                <div
+                  key={comment.id}
+                  className="rounded-md border-l-2 border-amber-500/60 bg-amber-500/5 p-2"
+                >
+                  <div className="text-[9px] font-medium text-amber-600 uppercase tracking-wide">
+                    Commenter
+                    {comment.device_name ? ` · ${comment.device_name}` : ""}
+                  </div>
+                  <p className="text-sm mt-0.5 whitespace-pre-wrap">
+                    {comment.text}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* AI Response */}
+          {hasResponse && (
+            <div>
+              {isAIProcessing && !lastAIResponse ? (
+                <div className="flex items-center gap-2 py-2">
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  <span className="text-xs text-muted-foreground">
+                    Generating response...
+                  </span>
+                </div>
+              ) : (
+                <div className="prose prose-sm max-w-none dark:prose-invert">
+                  <Markdown>{lastAIResponse}</Markdown>
+                  {isAIProcessing && (
+                    <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-1 align-middle" />
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* CONVERSATION MODE: AI on top, then System, then history */}
+      {conversationMode && (
+        <div className="space-y-2">
+          {/* AI Response - First (on top) */}
+          {hasResponse && (
+            <div className="rounded-md bg-background/50 p-2.5">
+              <div className="flex items-center gap-1.5 mb-1">
+                <BotIcon className="h-3 w-3 text-muted-foreground" />
+                <span className="text-[9px] font-medium text-muted-foreground uppercase tracking-wide">
+                  AI
+                </span>
+              </div>
+              {isAIProcessing && !lastAIResponse ? (
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                  <span className="text-[10px] text-muted-foreground">
+                    Generating...
+                  </span>
+                </div>
+              ) : (
+                <div className="prose prose-sm max-w-none dark:prose-invert text-sm">
+                  <Markdown>{lastAIResponse}</Markdown>
+                  {isAIProcessing && (
+                    <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-1 align-middle" />
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* System Input - Second */}
+          {lastTranscription && (
+            <div className="rounded-md border-l-2 border-primary/50 bg-primary/5 p-2.5">
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <div className="flex items-center gap-1.5">
+                  <HeadphonesIcon className="h-3 w-3 text-primary" />
+                  <span className="text-[9px] font-medium text-primary uppercase tracking-wide">
+                    System
+                  </span>
+                </div>
+                {pendingManualQuestion && (
+                  <Button
+                    size="sm"
+                    className="h-7 text-[10px] gap-1 px-2"
+                    onClick={() => void onSubmitPending()}
+                    disabled={isAIProcessing}
+                    title="Send detected speech to AI"
+                  >
+                    <SendIcon className="h-3 w-3" />
+                    Send
+                  </Button>
+                )}
+              </div>
+              <p className="text-sm">{lastTranscription}</p>
+            </div>
+          )}
+
+          {remoteComments.length > 0 && (
+            <div className="space-y-1.5">
+              {remoteComments.slice(-5).map((comment) => (
+                <div
+                  key={comment.id}
+                  className="rounded-md border-l-2 border-amber-500/60 bg-amber-500/5 p-2.5"
+                >
+                  <div className="text-[9px] font-medium text-amber-600 uppercase tracking-wide">
+                    Commenter
+                    {comment.device_name ? ` · ${comment.device_name}` : ""}
+                  </div>
+                  <p className="text-sm mt-1 whitespace-pre-wrap">
+                    {comment.text}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Previous Messages */}
+          {hasHistory && (
+            <div className="space-y-2 pt-2 border-t border-border/50">
+              <p className="text-[9px] text-muted-foreground uppercase tracking-wide">
+                Previous
+              </p>
+              <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                {conversation.messages
+                  .slice(0, -2)
+                  .sort((a, b) => b.timestamp - a.timestamp)
+                  .map((message, index) => (
+                    <div
+                      key={message.id || index}
+                      className={cn(
+                        "p-2 rounded-md text-[11px]",
+                        message.role === "user"
+                          ? "bg-primary/5 border-l-2 border-primary/30"
+                          : "bg-background/50"
+                      )}
+                    >
+                      <span className="text-[8px] font-medium text-muted-foreground uppercase">
+                        {message.role === "user" ? "System" : "AI"}
+                      </span>
+                      <div className="text-muted-foreground leading-relaxed mt-0.5">
+                        <Markdown>{message.content}</Markdown>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};

@@ -1,0 +1,75 @@
+name: Validate Twin Commenter
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - "src/**"
+      - "src-tauri/**"
+      - "commenter/**"
+      - "relay/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/validate-twin.yml"
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            libgtk-3-dev \
+            pkg-config \
+            libasound2-dev \
+            libpulse-dev \
+            libayatana-appindicator3-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build Pluely frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Cargo check Pluely host
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Build Twin Commenter frontend
+        working-directory: commenter
+        run: |
+          npm install
+          npm run build
+
+      - name: Validate Twin Relay
+        working-directory: relay
+        run: |
+          pip install -r requirements.txt
+          python -m compileall app
+          python -c "from app.main import app; print(app.title)"
+          python -m unittest discover -s tests -v
