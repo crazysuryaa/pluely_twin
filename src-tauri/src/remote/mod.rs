@@ -29,6 +29,7 @@ struct RemoteInner {
     history: Option<server::SharedEventHistory>,
     dedupe: Option<server::SharedCommentDedupe>,
     next_seq: u64,
+    relay_close: Option<RelayCloseInfo>,
     session: Option<RemoteSessionInfo>,
 }
 
@@ -42,6 +43,13 @@ pub struct RemoteSessionInfo {
     pub port: u16,
     pub relay_url: Option<String>,
     pub connection_url: String,
+}
+
+#[derive(Debug, Clone)]
+struct RelayCloseInfo {
+    relay_base_url: String,
+    session_id: String,
+    host_token: String,
 }
 
 fn discover_lan_host() -> String {
@@ -144,6 +152,7 @@ pub async fn start_remote_commenter(
         inner.history = Some(history);
         inner.dedupe = Some(dedupe);
         inner.next_seq = 0;
+        inner.relay_close = None;
         inner.session = Some(info.clone());
     }
 
@@ -213,6 +222,11 @@ pub async fn start_remote_commenter_relay(
         inner.history = Some(history);
         inner.dedupe = None;
         inner.next_seq = 0;
+        inner.relay_close = Some(RelayCloseInfo {
+            relay_base_url: relay_base_url.clone(),
+            session_id: relay_session.session_id.clone(),
+            host_token: relay_session.host_token.clone(),
+        });
         inner.session = Some(info.clone());
     }
 
@@ -221,24 +235,43 @@ pub async fn start_remote_commenter_relay(
 }
 
 #[tauri::command]
-pub fn stop_remote_commenter(
+pub async fn stop_remote_commenter(
     app: AppHandle,
     state: State<'_, RemoteState>,
 ) -> Result<(), String> {
-    let mut inner = state
-        .inner
-        .lock()
-        .map_err(|_| "Remote state lock poisoned".to_string())?;
+    let (task, relay_close) = {
+        let mut inner = state
+            .inner
+            .lock()
+            .map_err(|_| "Remote state lock poisoned".to_string())?;
 
-    if let Some(task) = inner.task.take() {
+        let task = inner.task.take();
+        let relay_close = inner.relay_close.take();
+
+        inner.outbound = None;
+        inner.history = None;
+        inner.dedupe = None;
+        inner.next_seq = 0;
+        inner.session = None;
+
+        (task, relay_close)
+    };
+
+    if let Some(task) = task {
         task.abort();
     }
 
-    inner.outbound = None;
-    inner.history = None;
-    inner.dedupe = None;
-    inner.next_seq = 0;
-    inner.session = None;
+    if let Some(close) = relay_close {
+        if let Err(error) = relay::close_relay_session(
+            &close.relay_base_url,
+            &close.session_id,
+            &close.host_token,
+        )
+        .await
+        {
+            tracing::warn!(%error, "Failed to revoke Twin relay session");
+        }
+    }
 
     let _ = app.emit(
         "remote-commenter-status",
