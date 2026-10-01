@@ -100,3 +100,48 @@ not need to wake an idle session object.
 
 The FastAPI implementation under `relay/` remains a local/self-hosted reference
 implementation and is not the primary production deployment.
+
+
+## Live screen media
+
+Screen sharing is a separate, read-only media lane from transcript/comment
+traffic.
+
+```text
+Host primary monitor
+   ↓ xcap capture
+JPEG ~5 fps, max 1600×1000
+   ↓
+Host media WSS
+   ↓
+TwinSession Durable Object
+   ↓
+Commenter media WSS
+   ↓
+left-side Live Host Screen pane
+```
+
+Endpoints:
+
+```text
+WS /api/v1/ws/:session/media/host
+WS /api/v1/ws/:session/media/commenter
+```
+
+The media channel reuses the session's role-scoped JWTs but does not share the
+control WebSocket. Binary media frames are never inserted into transcript
+history, replay buffers, prompts, or comment queues.
+
+The Host must explicitly press **Share Primary Screen**. **Stop Screen Share**
+terminates the media task without ending the remote-commenter session.
+
+Current transport properties:
+
+- primary monitor only
+- JPEG frames
+- approximately 5 frames/second
+- maximum encoded source dimensions 1600×1000
+- 2 MB maximum frame size at the relay
+- automatic media reconnect independent of control-channel reconnect
+- read-only on the Commenter side
+- no mouse, keyboard, clipboard, shell, file, or application control
