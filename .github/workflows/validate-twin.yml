@@ -8,6 +8,7 @@ on:
       - "src/**"
       - "src-tauri/**"
       - "commenter/**"
+      - "relay/**"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/validate-twin.yml"
@@ -46,6 +47,11 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Build Pluely frontend
         run: |
           npm ci
@@ -59,3 +65,10 @@ jobs:
         run: |
           npm install
           npm run build
+
+      - name: Validate Twin Relay
+        working-directory: relay
+        run: |
+          pip install -r requirements.txt
+          python -m compileall app
+          python -c "from app.main import app; print(app.title)"
