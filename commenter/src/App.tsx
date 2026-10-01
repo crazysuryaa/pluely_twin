@@ -597,7 +597,7 @@ export default function App() {
   return (
     <main
       style={{
-        maxWidth: 980,
+        maxWidth: 1440,
         margin: "0 auto",
         padding: 24,
         fontFamily: "sans-serif",
@@ -723,68 +723,196 @@ export default function App() {
             </div>
           ) : null}
 
-          <section style={{ marginTop: 20, minHeight: 360 }}>
-            {feed.length === 0 ? (
-              <div style={{ opacity: 0.6 }}>
-                Waiting for transcript, assistant output, or comments…
-              </div>
-            ) : (
-              feed.map((item) => (
-                <article
-                  key={item.id}
-                  style={{ marginBottom: 14 }}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1.65fr) minmax(320px, 0.85fr)",
+              gap: 16,
+              marginTop: 20,
+              minHeight: "calc(100vh - 150px)",
+            }}
+          >
+            <section
+              style={{
+                minWidth: 0,
+                border: "1px solid #d8d8d8",
+                borderRadius: 12,
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+                background: "#111",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "10px 12px",
+                  background: "#1b1b1b",
+                  color: "#fff",
+                  borderBottom: "1px solid #333",
+                }}
+              >
+                <strong style={{ fontSize: 13 }}>Live Host Screen</strong>
+                <span
+                  style={{
+                    fontSize: 11,
+                    opacity: 0.7,
+                  }}
                 >
-                  <strong>{item.source}</strong>
-                  {item.status === "pending" ? (
-                    <span
-                      style={{
-                        marginLeft: 8,
-                        fontSize: 11,
-                        opacity: 0.6,
-                      }}
-                    >
-                      sending…
-                    </span>
-                  ) : null}
+                  {hostConnected ? "Host connected" : "Host reconnecting"}
+                </span>
+              </div>
+
+              <div
+                id="host-screen-surface"
+                style={{
+                  flex: 1,
+                  minHeight: 520,
+                  display: "grid",
+                  placeItems: "center",
+                  padding: 24,
+                  color: "#d4d4d4",
+                  background:
+                    "radial-gradient(circle at center, #202020 0%, #111 72%)",
+                  textAlign: "center",
+                }}
+              >
+                <div style={{ maxWidth: 360 }}>
                   <div
                     style={{
-                      whiteSpace: "pre-wrap",
-                      marginTop: 3,
+                      fontSize: 18,
+                      fontWeight: 700,
+                      marginBottom: 8,
                     }}
                   >
-                    {item.text}
+                    Screen share will appear here
                   </div>
-                </article>
-              ))
-            )}
-          </section>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      lineHeight: 1.5,
+                      opacity: 0.72,
+                    }}
+                  >
+                    The two-column layout is ready. The live screen media
+                    transport is the next piece to connect to this surface.
+                  </div>
+                </div>
+              </div>
+            </section>
 
-          <form
-            onSubmit={sendComment}
-            style={{ display: "grid", gap: 8 }}
-          >
-            <textarea
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              maxLength={2000}
-              rows={3}
-              placeholder={
-                connected
-                  ? hostConnected
-                    ? "Send a comment to the Host…"
-                    : "Host is reconnecting — comment will remain queued…"
-                  : "Connection is recovering — comment will be queued…"
-              }
-            />
-            <button
-              type="submit"
-              disabled={!comment.trim()}
+            <section
+              style={{
+                minWidth: 0,
+                border: "1px solid #d8d8d8",
+                borderRadius: 12,
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+                background: "#fff",
+              }}
             >
-              {connected && hostConnected
-                ? "Send comment"
-                : "Queue comment"}
-            </button>
-          </form>
+              <div
+                style={{
+                  padding: "10px 12px",
+                  borderBottom: "1px solid #e6e6e6",
+                  fontWeight: 700,
+                  fontSize: 13,
+                }}
+              >
+                Session Feed
+              </div>
+
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflowY: "auto",
+                  padding: 14,
+                }}
+              >
+                {feed.length === 0 ? (
+                  <div style={{ opacity: 0.6 }}>
+                    Waiting for transcript, assistant output, or comments…
+                  </div>
+                ) : (
+                  feed.map((item) => (
+                    <article
+                      key={item.id}
+                      style={{
+                        marginBottom: 14,
+                        paddingBottom: 12,
+                        borderBottom: "1px solid #f0f0f0",
+                      }}
+                    >
+                      <strong>{item.source}</strong>
+                      {item.status === "pending" ? (
+                        <span
+                          style={{
+                            marginLeft: 8,
+                            fontSize: 11,
+                            opacity: 0.6,
+                          }}
+                        >
+                          sending…
+                        </span>
+                      ) : null}
+                      <div
+                        style={{
+                          whiteSpace: "pre-wrap",
+                          marginTop: 3,
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {item.text}
+                      </div>
+                    </article>
+                  ))
+                )}
+              </div>
+
+              <form
+                onSubmit={sendComment}
+                style={{
+                  display: "grid",
+                  gap: 8,
+                  padding: 12,
+                  borderTop: "1px solid #e6e6e6",
+                  background: "#fafafa",
+                }}
+              >
+                <textarea
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  maxLength={2000}
+                  rows={4}
+                  placeholder={
+                    connected
+                      ? hostConnected
+                        ? "Send a comment to the Host…"
+                        : "Host is reconnecting — comment will remain queued…"
+                      : "Connection is recovering — comment will be queued…"
+                  }
+                  style={{
+                    width: "100%",
+                    resize: "vertical",
+                    boxSizing: "border-box",
+                  }}
+                />
+                <button
+                  type="submit"
+                  disabled={!comment.trim()}
+                >
+                  {connected && hostConnected
+                    ? "Send comment"
+                    : "Queue comment"}
+                </button>
+              </form>
+            </section>
+          </div>
         </>
       )}
     </main>
