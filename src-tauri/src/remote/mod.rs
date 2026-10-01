@@ -236,19 +236,22 @@ pub async fn start_remote_commenter_relay(
         );
     };
 
-    if remember_create_key.unwrap_or(true) {
-        if provided_key.is_some() {
-            save_relay_create_key(&effective_key)?;
-        }
-    } else {
-        remove_relay_create_key()?;
-    }
+    let remember_create_key = remember_create_key.unwrap_or(true);
 
     let relay_session = relay::create_relay_session(
         &relay_base_url,
         Some(&effective_key),
     )
     .await?;
+
+    // Only persist a newly supplied key after the relay has accepted it.
+    if remember_create_key {
+        if provided_key.is_some() {
+            save_relay_create_key(&effective_key)?;
+        }
+    } else {
+        remove_relay_create_key()?;
+    }
 
     let (tx, history) = new_event_state();
 
