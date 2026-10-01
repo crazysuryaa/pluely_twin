@@ -6,6 +6,11 @@ import { cn } from "@/lib/utils";
 type Props = {
   lastTranscription: string;
   lastAIResponse: string;
+  remoteComments: Array<{
+    id: string;
+    text: string;
+    device_name?: string | null;
+  }>;
   isAIProcessing: boolean;
   conversation: ChatConversation;
   conversationMode: boolean;
@@ -15,6 +20,7 @@ type Props = {
 export const ResultsSection = ({
   lastTranscription,
   lastAIResponse,
+  remoteComments,
   isAIProcessing,
   conversation,
   conversationMode,
@@ -61,6 +67,25 @@ export const ResultsSection = ({
             <p className="text-[11px] text-muted-foreground">
               <span className="font-semibold">System:</span> {lastTranscription}
             </p>
+          )}
+
+          {remoteComments.length > 0 && (
+            <div className="space-y-1.5">
+              {remoteComments.slice(-5).map((comment) => (
+                <div
+                  key={comment.id}
+                  className="rounded-md border-l-2 border-amber-500/60 bg-amber-500/5 p-2"
+                >
+                  <div className="text-[9px] font-medium text-amber-600 uppercase tracking-wide">
+                    Commenter
+                    {comment.device_name ? ` · ${comment.device_name}` : ""}
+                  </div>
+                  <p className="text-sm mt-0.5 whitespace-pre-wrap">
+                    {comment.text}
+                  </p>
+                </div>
+              ))}
+            </div>
           )}
 
           {/* AI Response */}
@@ -126,6 +151,25 @@ export const ResultsSection = ({
                 </span>
               </div>
               <p className="text-sm">{lastTranscription}</p>
+            </div>
+          )}
+
+          {remoteComments.length > 0 && (
+            <div className="space-y-1.5">
+              {remoteComments.slice(-5).map((comment) => (
+                <div
+                  key={comment.id}
+                  className="rounded-md border-l-2 border-amber-500/60 bg-amber-500/5 p-2.5"
+                >
+                  <div className="text-[9px] font-medium text-amber-600 uppercase tracking-wide">
+                    Commenter
+                    {comment.device_name ? ` · ${comment.device_name}` : ""}
+                  </div>
+                  <p className="text-sm mt-1 whitespace-pre-wrap">
+                    {comment.text}
+                  </p>
+                </div>
+              ))}
             </div>
           )}
 
