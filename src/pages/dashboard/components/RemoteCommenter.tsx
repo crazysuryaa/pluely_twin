@@ -3,10 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Button, Input } from "@/components";
 import { CheckIcon, CopyIcon, Globe2Icon, WifiIcon } from "lucide-react";
-import { getItem, saveItem, removeItem } from "tauri-plugin-keychain";
 
 const RELAY_URL_KEY = "twin-relay-url";
-const RELAY_CREATE_KEY_KEYCHAIN = "pluely-twin-relay-create-key";
 const DEFAULT_RELAY_URL =
   import.meta.env.VITE_TWIN_RELAY_URL ||
   "https://pluely-twin-relay.karta-testing.workers.dev";
@@ -51,7 +49,8 @@ export const RemoteCommenter = () => {
   );
   const [relayCreateKey, setRelayCreateKey] = useState("");
   const [rememberRelayCreateKey, setRememberRelayCreateKey] = useState(true);
-  const [keyLoaded, setKeyLoaded] = useState(false);
+  const [hasSavedRelayCreateKey, setHasSavedRelayCreateKey] = useState(false);
+  const [keyStatusLoaded, setKeyStatusLoaded] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [starting, setStarting] = useState<"relay" | "lan" | null>(null);
   const [copied, setCopied] = useState(false);
@@ -62,17 +61,10 @@ export const RemoteCommenter = () => {
       .then(setSession)
       .catch(() => setSession(null));
 
-    getItem(RELAY_CREATE_KEY_KEYCHAIN)
-      .then((savedKey) => {
-        if (savedKey) {
-          setRelayCreateKey(savedKey);
-          setRememberRelayCreateKey(true);
-        }
-      })
-      .catch(() => {
-        // Keychain may be unavailable on some development environments.
-      })
-      .finally(() => setKeyLoaded(true));
+    invoke<boolean>("has_remote_relay_create_key")
+      .then(setHasSavedRelayCreateKey)
+      .catch(() => setHasSavedRelayCreateKey(false))
+      .finally(() => setKeyStatusLoaded(true));
 
     const stopComment = listen<RemoteComment>("remote-comment", (event) => {
       setComments((current) => [...current.slice(-99), event.payload]);
@@ -138,13 +130,13 @@ export const RemoteCommenter = () => {
       return;
     }
 
-    if (!keyLoaded) {
+    if (!keyStatusLoaded) {
       setError("Secure relay settings are still loading. Try again in a moment.");
       return;
     }
 
-    if (!relayCreateKey.trim()) {
-      setError("Enter the relay create key once. It can be remembered securely after that.");
+    if (!relayCreateKey.trim() && !hasSavedRelayCreateKey) {
+      setError("Enter the relay create key once. It will be remembered securely on this computer.");
       setShowAdvanced(true);
       return;
     }
@@ -160,25 +152,33 @@ export const RemoteCommenter = () => {
         "start_remote_commenter_relay",
         {
           relayBaseUrl: normalizedRelayUrl,
-          createKey: relayCreateKey.trim(),
+          createKey: relayCreateKey.trim() || null,
+          rememberCreateKey: rememberRelayCreateKey,
         }
       );
 
-      if (rememberRelayCreateKey) {
-        await saveItem(
-          RELAY_CREATE_KEY_KEYCHAIN,
-          relayCreateKey.trim()
-        );
-      } else {
-        await removeItem(RELAY_CREATE_KEY_KEYCHAIN).catch(() => undefined);
-      }
-
+      setHasSavedRelayCreateKey(
+        rememberRelayCreateKey &&
+          (hasSavedRelayCreateKey || Boolean(relayCreateKey.trim()))
+      );
+      setRelayCreateKey("");
       setSession(next);
     } catch (e) {
       setRelayStatus(null);
       setError(String(e));
     } finally {
       setStarting(null);
+    }
+  };
+
+  const forgetSavedRelayKey = async () => {
+    setError(null);
+    try {
+      await invoke("clear_remote_relay_create_key");
+      setHasSavedRelayCreateKey(false);
+      setRelayCreateKey("");
+    } catch (e) {
+      setError(String(e));
     }
   };
 
@@ -302,9 +302,26 @@ export const RemoteCommenter = () => {
                   onChange={(event) =>
                     setRelayCreateKey(event.target.value)
                   }
-                  placeholder="Enter once"
+                  placeholder={
+                    hasSavedRelayCreateKey
+                      ? "Saved securely — leave blank to use it"
+                      : "Enter once"
+                  }
                 />
               </label>
+
+              {hasSavedRelayCreateKey ? (
+                <div className="flex items-center justify-between gap-3 text-[10px] text-muted-foreground">
+                  <span>✓ Create key saved securely on this computer</span>
+                  <button
+                    type="button"
+                    className="underline hover:text-foreground"
+                    onClick={forgetSavedRelayKey}
+                  >
+                    Forget saved key
+                  </button>
+                </div>
+              ) : null}
 
               <label className="flex items-center gap-2 text-xs text-muted-foreground">
                 <input
@@ -318,8 +335,9 @@ export const RemoteCommenter = () => {
               </label>
 
               <p className="text-[10px] text-muted-foreground">
-                The relay URL is preconfigured. The create key is stored in the
-                operating system keychain, not browser local storage.
+                The relay URL is preconfigured. The create key is handled by the
+                desktop backend and stored in the operating system credential store,
+                not browser local storage.
               </p>
 
               <div className="border-t border-border/50 pt-3">
