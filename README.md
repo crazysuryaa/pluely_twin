@@ -99,7 +99,7 @@ UPSTREAM.md                  upstream attribution
 
 Active development is currently on **`develop`**.
 
-For worldwide use, deploy `cloudflare-relay/` and enter its HTTPS Workers URL in Dashboard → Twin Commenter → Connection settings. Each session is routed to one Durable Object, so no sticky-session/Redis layer is required for normal horizontal scaling.
+For worldwide use, deploy `cloudflare-relay/` once. The production Workers URL is preconfigured in distributed Host binaries, so end users do not need Cloudflare settings or permanent relay credentials. Each session is routed to one Durable Object.
 
 See `cloudflare-relay/README.md` for deployment instructions.
 
@@ -108,11 +108,13 @@ The next major media feature is a consent-based read-only host screen stream. St
 
 ### Worldwide session flow
 
-1. Deploy `cloudflare-relay/` with Wrangler and copy its HTTPS Workers URL.
-2. In the Host dashboard, open **Twin Commenter → Connection settings** and enter the Relay URL.
-3. Press **Start Worldwide Session**.
-4. Press **Copy Connection Link**.
-5. Paste that link into the Twin Commenter app on the other computer.
-6. Both apps connect outbound to the relay and recover automatically from ordinary network interruptions.
+1. Deploy `cloudflare-relay/` once.
+2. Distribute the Host and Commenter binaries.
+3. Host presses **Start Worldwide Session**.
+4. Host presses **Copy Connection Link** and sends it to the Commenter user.
+5. Commenter pastes the link and presses **Connect**.
+6. Both apps connect outbound to Cloudflare and recover automatically from ordinary network interruptions.
+
+No Cloudflare account, relay URL entry, create key, port forwarding, or public IP configuration is required on distributed laptops.
 
 The copied link contains a short-lived Commenter credential. Treat it like a temporary invitation and stop the Host session when it is no longer needed.
