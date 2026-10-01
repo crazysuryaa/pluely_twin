@@ -19,8 +19,9 @@ See [UPSTREAM.md](UPSTREAM.md) and [LICENSE](LICENSE).
 
 Twin Commenter now supports two transports:
 
-- **Worldwide Relay** — Host and Commenter both make outbound WSS connections to a deployed FastAPI relay.
+- **Worldwide Relay** — Host and Commenter both make outbound WSS connections through Cloudflare Workers + one SQLite-backed Durable Object per session.
 - **LAN fallback** — direct local WebSocket connection on the same reachable network.
+- **FastAPI reference relay** — retained under `relay/` for local/self-hosted development.
 
 The companion app is designed around a deliberately narrow permission model.
 
@@ -55,7 +56,10 @@ If speaker diarization is added later, the same Commenter source can coexist wit
 ## Implemented on `develop`
 
 - complete pinned Pluely v0.1.9 source tree
-- worldwide FastAPI/WSS Twin Relay service
+- production Cloudflare Worker + SQLite-backed Durable Object relay
+- WebSocket Hibernation with per-connection attachment recovery
+- persistent replay / pending-comment / acknowledgement state in Durable Object SQLite
+- FastAPI relay retained as local/self-hosted protocol reference
 - role-scoped expiring Host / Commenter JWTs
 - outbound Host relay client with automatic reconnect
 - Commenter worldwide relay-link support
@@ -83,7 +87,8 @@ src-tauri/                   Pluely Tauri/Rust backend
 src-tauri/src/remote/        integrated Twin Commenter backend
 
 commenter/                   Twin Commenter desktop app
-relay/                       FastAPI worldwide relay service
+cloudflare-relay/            production worldwide Worker + Durable Object relay
+relay/                       FastAPI local/self-hosted reference relay
 
 host-patch/                  integration reference / patch documentation
 docs/ARCHITECTURE.md         protocol architecture
@@ -94,16 +99,16 @@ UPSTREAM.md                  upstream attribution
 
 Active development is currently on **`develop`**.
 
-For worldwide use, deploy `relay/` and enter its HTTPS URL in Dashboard → Twin Commenter → Connection settings.
+For worldwide use, deploy `cloudflare-relay/` and enter its HTTPS Workers URL in Dashboard → Twin Commenter → Connection settings. Each session is routed to one Durable Object, so no sticky-session/Redis layer is required for normal horizontal scaling.
 
-The first deployment should run a single always-warm relay instance because live sockets and replay buffers are currently process-local. See `relay/README.md`. Horizontal scaling should wait for Redis/pub-sub shared state.
+See `cloudflare-relay/README.md` for deployment instructions.
 
 The next major media feature is a consent-based read-only host screen stream. Structured transcript/AI/comment traffic should remain separate from that media channel.
 
 
 ### Worldwide session flow
 
-1. Deploy `relay/` and copy its HTTPS service URL.
+1. Deploy `cloudflare-relay/` with Wrangler and copy its HTTPS Workers URL.
 2. In the Host dashboard, open **Twin Commenter → Connection settings** and enter the Relay URL.
 3. Press **Start Worldwide Session**.
 4. Press **Copy Connection Link**.
