@@ -7,6 +7,8 @@ import { Button } from "@/components";
 import { useApp } from "@/contexts";
 import { floatArrayToWav } from "@/lib/utils";
 import { shouldUsePluelyAPI } from "@/lib/functions/pluely.api";
+import { STORAGE_KEYS } from "@/config";
+import { safeLocalStorage } from "@/lib/storage";
 
 interface AutoSpeechVADProps {
   submit: UseCompletionReturn["submit"];
@@ -81,7 +83,19 @@ const AutoSpeechVADInternal = ({
         });
 
         if (transcription) {
-          submit(transcription);
+          const submitMode =
+            safeLocalStorage.getItem(STORAGE_KEYS.SPEECH_SUBMIT_MODE) ||
+            "manual";
+
+          if (submitMode === "auto") {
+            submit(transcription);
+          } else {
+            setState((prev: any) => ({
+              ...prev,
+              input: transcription,
+              error: null,
+            }));
+          }
         }
       } catch (error) {
         console.error("Failed to transcribe audio:", error);
