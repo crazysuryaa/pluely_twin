@@ -178,14 +178,14 @@ pub async fn run_host_relay(
                 incoming = source.next() => {
                     match incoming {
                         Some(Ok(Message::Text(text))) => {
-                            if text == "ping" {
+                            if text.as_str() == "ping" {
                                 if sink.send(Message::Text("pong".into())).await.is_err() {
                                     break true;
                                 }
                                 continue;
                             }
 
-                            if text == "pong" {
+                            if text.as_str() == "pong" {
                                 continue;
                             }
 
