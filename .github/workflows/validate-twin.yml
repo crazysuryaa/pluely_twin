@@ -66,3 +66,5 @@ jobs:
           git add src-tauri/Cargo.lock
           git commit -m "chore: update Cargo.lock for Twin Commenter"
           git push origin develop
+
+# validation-pass: integrated-live-comments
