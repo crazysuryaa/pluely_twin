@@ -119,8 +119,6 @@ pub fn run() {
             speaker::get_output_devices,
             remote::start_remote_commenter,
             remote::start_remote_commenter_relay,
-            remote::has_remote_relay_create_key,
-            remote::clear_remote_relay_create_key,
             remote::stop_remote_commenter,
             remote::get_remote_commenter_status,
             remote::publish_host_event,
