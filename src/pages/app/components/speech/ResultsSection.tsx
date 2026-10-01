@@ -29,7 +29,7 @@ export const ResultsSection = ({
   const hasResponse = lastAIResponse || isAIProcessing;
   const hasHistory = conversation.messages.length > 2;
 
-  if (!hasResponse && !lastTranscription) {
+  if (!hasResponse && !lastTranscription && remoteComments.length === 0) {
     return null;
   }
 
