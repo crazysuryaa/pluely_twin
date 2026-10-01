@@ -233,8 +233,8 @@ export default function App() {
           }
 
           if (value.type === "authentication_failed") {
-            manualDisconnectRef.current = true;
             setScreenStatus("Screen stream authentication failed");
+            mediaSocketRef.current = null;
             socket.close();
           }
         } catch {
