@@ -33,12 +33,12 @@ impl Default for VadConfig {
         Self {
             enabled: true,
             hop_size: 1024,
-            sensitivity_rms: 0.012, // Much less sensitive - only real speech
-            peak_threshold: 0.035,  // Higher threshold - filters clicks/noise
-            silence_chunks: 45,     // ~1.0s of silence before stopping
-            min_speech_chunks: 7,   // ~0.16s - captures short answers
-            pre_speech_chunks: 12,  // ~0.27s - enough to catch word start
-            noise_gate_threshold: 0.003, // Stronger noise filtering
+            sensitivity_rms: 0.014,
+            peak_threshold: 0.05,
+            silence_chunks: 55,
+            min_speech_chunks: 18,
+            pre_speech_chunks: 12,
+            noise_gate_threshold: 0.004
             max_recording_duration_secs: 180, // 3 minutes default
         }
     }
@@ -164,7 +164,13 @@ async fn run_vad_capture(
             let mono = apply_noise_gate(&mono, config.noise_gate_threshold);
 
             let (rms, peak) = calculate_audio_metrics(&mono);
-            let is_speech = rms > config.sensitivity_rms || peak > config.peak_threshold;
+
+            // Avoid treating a single click/spike as speech. A high peak only
+            // counts when there is also meaningful sustained energy.
+            let rms_speech = rms > config.sensitivity_rms;
+            let corroborated_peak =
+                peak > config.peak_threshold && rms > config.sensitivity_rms * 0.55;
+            let is_speech = rms_speech || corroborated_peak;
 
             if is_speech {
                 if !in_speech {
