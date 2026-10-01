@@ -16,42 +16,6 @@ use uuid::Uuid;
 pub use protocol::{HostEvent, RemoteComment, SequencedHostEvent};
 
 const EVENT_HISTORY_LIMIT: usize = 5_000;
-const RELAY_KEYRING_SERVICE: &str = "pluely-twin";
-const RELAY_KEYRING_ACCOUNT: &str = "relay-create-key";
-
-fn relay_keyring_entry() -> Result<keyring::Entry, String> {
-    keyring::Entry::new(RELAY_KEYRING_SERVICE, RELAY_KEYRING_ACCOUNT)
-        .map_err(|e| format!("Failed to access OS credential store: {e}"))
-}
-
-fn load_relay_create_key() -> Result<Option<String>, String> {
-    let entry = relay_keyring_entry()?;
-    match entry.get_password() {
-        Ok(value) if !value.trim().is_empty() => Ok(Some(value)),
-        Ok(_) => Ok(None),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(error) => Err(format!(
-            "Failed to read relay create key from OS credential store: {error}"
-        )),
-    }
-}
-
-fn save_relay_create_key(value: &str) -> Result<(), String> {
-    relay_keyring_entry()?
-        .set_password(value)
-        .map_err(|e| format!("Failed to save relay create key securely: {e}"))
-}
-
-fn remove_relay_create_key() -> Result<(), String> {
-    let entry = relay_keyring_entry()?;
-    match entry.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(error) => Err(format!(
-            "Failed to remove relay create key from OS credential store: {error}"
-        )),
-    }
-}
-
 #[derive(Default)]
 pub struct RemoteState {
     inner: Mutex<RemoteInner>,
@@ -196,22 +160,10 @@ pub async fn start_remote_commenter(
 }
 
 #[tauri::command]
-pub fn has_remote_relay_create_key() -> Result<bool, String> {
-    Ok(load_relay_create_key()?.is_some())
-}
-
-#[tauri::command]
-pub fn clear_remote_relay_create_key() -> Result<(), String> {
-    remove_relay_create_key()
-}
-
-#[tauri::command]
 pub async fn start_remote_commenter_relay(
     app: AppHandle,
     state: State<'_, RemoteState>,
     relay_base_url: String,
-    create_key: Option<String>,
-    remember_create_key: Option<bool>,
 ) -> Result<RemoteSessionInfo, String> {
     ensure_not_active(&state)?;
 
@@ -220,38 +172,11 @@ pub async fn start_remote_commenter_relay(
         return Err("Twin relay URL is required".to_string());
     }
 
-    let provided_key = create_key
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-
-    let effective_key = match provided_key.clone() {
-        Some(value) => Some(value),
-        None => load_relay_create_key()?,
-    };
-
-    let Some(effective_key) = effective_key else {
-        return Err(
-            "Relay create key is not configured. Enter it once in Connection settings."
-                .to_string(),
-        );
-    };
-
-    let remember_create_key = remember_create_key.unwrap_or(true);
-
     let relay_session = relay::create_relay_session(
         &relay_base_url,
-        Some(&effective_key),
+        None,
     )
     .await?;
-
-    // Only persist a newly supplied key after the relay has accepted it.
-    if remember_create_key {
-        if provided_key.is_some() {
-            save_relay_create_key(&effective_key)?;
-        }
-    } else {
-        remove_relay_create_key()?;
-    }
 
     let (tx, history) = new_event_state();
 
