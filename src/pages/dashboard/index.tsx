@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { GetLicense } from "@/components";
-import { PluelyApiSetup, Usage } from "./components";
+import { PluelyApiSetup, RemoteCommenter, Usage } from "./components";
 import { PageLayout } from "@/layouts";
 import { useApp } from "@/contexts";
 
@@ -52,6 +52,8 @@ const Dashboard = () => {
       description="Pluely license to unlock faster responses, quicker support and premium features."
       rightSlot={!hasActiveLicense ? <GetLicense /> : null}
     >
+      <RemoteCommenter />
+
       {/* Pluely API Setup */}
       <PluelyApiSetup />
 
