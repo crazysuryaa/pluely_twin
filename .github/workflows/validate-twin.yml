@@ -5,20 +5,25 @@ on:
     branches:
       - develop
     paths:
+      - "src/**"
+      - "src-tauri/**"
+      - "commenter/**"
+      - "package.json"
+      - "package-lock.json"
       - ".github/workflows/validate-twin.yml"
+  pull_request:
+    branches:
+      - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout develop
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: develop
-          fetch-depth: 0
 
       - name: Install Linux dependencies
         run: |
@@ -54,17 +59,3 @@ jobs:
         run: |
           npm install
           npm run build
-
-      - name: Persist Cargo.lock update
-        run: |
-          if git diff --quiet -- src-tauri/Cargo.lock; then
-            echo "Cargo.lock unchanged"
-            exit 0
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src-tauri/Cargo.lock
-          git commit -m "chore: update Cargo.lock for Twin Commenter"
-          git push origin develop
-
-# validation-pass: integrated-live-comments
