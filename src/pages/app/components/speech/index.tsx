@@ -69,7 +69,7 @@ export const SystemAudio = (props: useSystemAudioType) => {
   const { supportsImages } = useApp();
 
   // View mode toggle
-  const [conversationMode, setConversationMode] = useState(false);
+  const [conversationMode, setConversationMode] = useState(true);
 
   // Screenshot state
   const [screenshotImage, setScreenshotImage] = useState<string | null>(null);
