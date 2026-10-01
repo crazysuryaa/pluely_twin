@@ -26,6 +26,7 @@ import { Warning } from "./Warning";
 import { useSystemAudioType } from "@/hooks";
 import { useApp } from "@/contexts";
 import { cn } from "@/lib/utils";
+import { MAX_FILES } from "@/config";
 
 export const SystemAudio = (props: useSystemAudioType) => {
   const {
@@ -34,6 +35,11 @@ export const SystemAudio = (props: useSystemAudioType) => {
     isAIProcessing,
     lastTranscription,
     lastAIResponse,
+    pendingManualQuestion,
+    submitPendingQuestion,
+    attachedScreenshots,
+    addScreenshot,
+    removeScreenshot,
     remoteComments,
     error,
     setupRequired,
@@ -72,7 +78,6 @@ export const SystemAudio = (props: useSystemAudioType) => {
   const [conversationMode, setConversationMode] = useState(true);
 
   // Screenshot state
-  const [screenshotImage, setScreenshotImage] = useState<string | null>(null);
   const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
 
   const isVadMode = vadConfig.enabled;
@@ -93,13 +98,6 @@ export const SystemAudio = (props: useSystemAudioType) => {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isPopoverOpen]);
-
-  // Reset screenshot when processing starts (message is being sent)
-  useEffect(() => {
-    if (isProcessing && screenshotImage) {
-      setScreenshotImage(null);
-    }
-  }, [isProcessing, screenshotImage]);
 
   const handleToggleCapture = async () => {
     if (capturing) {
@@ -143,17 +141,13 @@ export const SystemAudio = (props: useSystemAudioType) => {
         screenId: null, // Use default screen
       });
 
-      setScreenshotImage(base64);
+      addScreenshot(base64);
     } catch (err) {
       console.error("Failed to capture screenshot:", err);
     } finally {
       setIsCapturingScreenshot(false);
     }
-  }, [isCapturingScreenshot]);
-
-  const handleRemoveScreenshot = useCallback(() => {
-    setScreenshotImage(null);
-  }, []);
+  }, [isCapturingScreenshot, addScreenshot]);
 
   const getButtonIcon = () => {
     if (setupRequired) return <AlertCircleIcon className="text-orange-500" />;
@@ -230,14 +224,18 @@ export const SystemAudio = (props: useSystemAudioType) => {
                   {!setupRequired && supportsImages && (
                     <Button
                       size="sm"
-                      variant={screenshotImage ? "default" : "outline"}
+                      variant={attachedScreenshots.length > 0 ? "default" : "outline"}
                       onClick={handleCaptureScreenshot}
-                      disabled={isCapturingScreenshot}
+                      disabled={
+                        isCapturingScreenshot ||
+                        attachedScreenshots.length >= MAX_FILES
+                      }
                       className={cn(
                         "h-6 text-[10px] gap-1 px-2",
-                        screenshotImage && "bg-primary text-primary-foreground"
+                        attachedScreenshots.length > 0 &&
+                          "bg-primary text-primary-foreground"
                       )}
-                      title="Capture screenshot to include with transcription"
+                      title="Capture and attach screenshot to the next question"
                     >
                       {isCapturingScreenshot ? (
                         <LoaderIcon className="w-3 h-3 animate-spin" />
@@ -245,6 +243,9 @@ export const SystemAudio = (props: useSystemAudioType) => {
                         <CameraIcon className="w-3 h-3" />
                       )}
                       Screenshot
+                      {attachedScreenshots.length > 0
+                        ? ` ${attachedScreenshots.length}/${MAX_FILES}`
+                        : ""}
                     </Button>
                   )}
 
@@ -283,30 +284,42 @@ export const SystemAudio = (props: useSystemAudioType) => {
 
             <ScrollArea className="flex-1 min-h-0" ref={scrollAreaRef}>
               <div className="p-2 space-y-2">
-                {/* Screenshot Preview */}
-                {screenshotImage && (
-                  <div className="flex items-center gap-2 p-2 rounded-lg bg-primary/5 border border-primary/20">
-                    <img
-                      src={`data:image/png;base64,${screenshotImage}`}
-                      alt="Screenshot"
-                      className="h-12 w-20 object-cover rounded"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[10px] font-medium">
-                        Screenshot attached
-                      </p>
-                      <p className="text-[9px] text-muted-foreground">
-                        Will be sent with next transcription
-                      </p>
+                {/* Screenshot Previews */}
+                {attachedScreenshots.length > 0 && (
+                  <div className="rounded-lg bg-primary/5 border border-primary/20 p-2 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-[10px] font-medium">
+                          Attached screenshots
+                        </p>
+                        <p className="text-[9px] text-muted-foreground">
+                          All will be sent with the next submitted question
+                        </p>
+                      </div>
+                      <span className="text-[9px] text-muted-foreground">
+                        {attachedScreenshots.length}/{MAX_FILES}
+                      </span>
                     </div>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-5 w-5"
-                      onClick={handleRemoveScreenshot}
-                    >
-                      <XIcon className="h-3 w-3" />
-                    </Button>
+                    <div className="grid grid-cols-3 gap-2">
+                      {attachedScreenshots.map((image, index) => (
+                        <div key={index} className="relative group">
+                          <img
+                            src={`data:image/png;base64,${image}`}
+                            alt={`Screenshot ${index + 1}`}
+                            className="h-16 w-full object-cover rounded border"
+                          />
+                          <Button
+                            size="icon"
+                            variant="destructive"
+                            className="absolute top-1 right-1 h-5 w-5"
+                            onClick={() => removeScreenshot(index)}
+                            title="Remove screenshot"
+                          >
+                            <XIcon className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -352,6 +365,8 @@ export const SystemAudio = (props: useSystemAudioType) => {
                     <ResultsSection
                       lastTranscription={lastTranscription}
                       lastAIResponse={lastAIResponse}
+                      pendingManualQuestion={pendingManualQuestion}
+                      onSubmitPending={submitPendingQuestion}
                       remoteComments={remoteComments}
                       isAIProcessing={isAIProcessing}
                       conversation={conversation}
