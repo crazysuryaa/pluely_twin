@@ -47,10 +47,6 @@ export const RemoteCommenter = () => {
   const [relayUrl, setRelayUrl] = useState(
     () => localStorage.getItem(RELAY_URL_KEY) || DEFAULT_RELAY_URL
   );
-  const [relayCreateKey, setRelayCreateKey] = useState("");
-  const [rememberRelayCreateKey, setRememberRelayCreateKey] = useState(true);
-  const [hasSavedRelayCreateKey, setHasSavedRelayCreateKey] = useState(false);
-  const [keyStatusLoaded, setKeyStatusLoaded] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [starting, setStarting] = useState<"relay" | "lan" | null>(null);
   const [copied, setCopied] = useState(false);
@@ -60,11 +56,6 @@ export const RemoteCommenter = () => {
     invoke<SessionInfo | null>("get_remote_commenter_status")
       .then(setSession)
       .catch(() => setSession(null));
-
-    invoke<boolean>("has_remote_relay_create_key")
-      .then(setHasSavedRelayCreateKey)
-      .catch(() => setHasSavedRelayCreateKey(false))
-      .finally(() => setKeyStatusLoaded(true));
 
     const stopComment = listen<RemoteComment>("remote-comment", (event) => {
       setComments((current) => [...current.slice(-99), event.payload]);
@@ -130,17 +121,6 @@ export const RemoteCommenter = () => {
       return;
     }
 
-    if (!keyStatusLoaded) {
-      setError("Secure relay settings are still loading. Try again in a moment.");
-      return;
-    }
-
-    if (!relayCreateKey.trim() && !hasSavedRelayCreateKey) {
-      setError("Enter the relay create key once. It will be remembered securely on this computer.");
-      setShowAdvanced(true);
-      return;
-    }
-
     setStarting("relay");
     setConnections([]);
     setRelayStatus({ status: "connecting" });
@@ -152,33 +132,15 @@ export const RemoteCommenter = () => {
         "start_remote_commenter_relay",
         {
           relayBaseUrl: normalizedRelayUrl,
-          createKey: relayCreateKey.trim() || null,
-          rememberCreateKey: rememberRelayCreateKey,
         }
       );
 
-      setHasSavedRelayCreateKey(
-        rememberRelayCreateKey &&
-          (hasSavedRelayCreateKey || Boolean(relayCreateKey.trim()))
-      );
-      setRelayCreateKey("");
       setSession(next);
     } catch (e) {
       setRelayStatus(null);
       setError(String(e));
     } finally {
       setStarting(null);
-    }
-  };
-
-  const forgetSavedRelayKey = async () => {
-    setError(null);
-    try {
-      await invoke("clear_remote_relay_create_key");
-      setHasSavedRelayCreateKey(false);
-      setRelayCreateKey("");
-    } catch (e) {
-      setError(String(e));
     }
   };
 
@@ -292,54 +254,6 @@ export const RemoteCommenter = () => {
                 />
               </label>
 
-              <label className="space-y-1 block">
-                <span className="text-xs font-medium">
-                  Relay create key
-                </span>
-                <Input
-                  type="password"
-                  value={relayCreateKey}
-                  onChange={(event) =>
-                    setRelayCreateKey(event.target.value)
-                  }
-                  placeholder={
-                    hasSavedRelayCreateKey
-                      ? "Saved securely — leave blank to use it"
-                      : "Enter once"
-                  }
-                />
-              </label>
-
-              {hasSavedRelayCreateKey ? (
-                <div className="flex items-center justify-between gap-3 text-[10px] text-muted-foreground">
-                  <span>✓ Create key saved securely on this computer</span>
-                  <button
-                    type="button"
-                    className="underline hover:text-foreground"
-                    onClick={forgetSavedRelayKey}
-                  >
-                    Forget saved key
-                  </button>
-                </div>
-              ) : null}
-
-              <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={rememberRelayCreateKey}
-                  onChange={(event) =>
-                    setRememberRelayCreateKey(event.target.checked)
-                  }
-                />
-                Remember create key securely on this computer
-              </label>
-
-              <p className="text-[10px] text-muted-foreground">
-                The relay URL is preconfigured. The create key is handled by the
-                desktop backend and stored in the operating system credential store,
-                not browser local storage.
-              </p>
-
               <div className="border-t border-border/50 pt-3">
                 <Button
                   size="sm"
@@ -353,7 +267,7 @@ export const RemoteCommenter = () => {
                 </Button>
                 <p className="text-[10px] text-muted-foreground mt-2">
                   LAN mode is a local fallback and requires both devices to be
-                  reachable on the same network.
+                  reachable on the same network. Worldwide mode needs no user setup.
                 </p>
               </div>
             </div>
