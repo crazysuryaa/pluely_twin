@@ -17,7 +17,6 @@ jobs:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       TWIN_RELAY_SECRET_KEY: ${{ secrets.TWIN_RELAY_SECRET_KEY }}
-      TWIN_RELAY_CREATE_KEY: ${{ secrets.TWIN_RELAY_CREATE_KEY }}
 
     steps:
       - name: Checkout
@@ -43,7 +42,6 @@ jobs:
 
           required = [
               "TWIN_RELAY_SECRET_KEY",
-              "TWIN_RELAY_CREATE_KEY",
           ]
           missing = [name for name in required if not os.environ.get(name)]
           if missing:
@@ -55,7 +53,6 @@ jobs:
               json.dump(
                   {
                       "TWIN_RELAY_SECRET_KEY": os.environ["TWIN_RELAY_SECRET_KEY"],
-                      "TWIN_RELAY_CREATE_KEY": os.environ["TWIN_RELAY_CREATE_KEY"],
                   },
                   handle,
               )
