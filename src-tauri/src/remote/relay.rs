@@ -59,6 +59,35 @@ pub async fn create_relay_session(
         .map_err(|e| format!("Invalid Twin relay response: {e}"))
 }
 
+pub async fn close_relay_session(
+    relay_base_url: &str,
+    session_id: &str,
+    host_token: &str,
+) -> Result<(), String> {
+    let url = format!(
+        "{}/api/v1/sessions/{}/close",
+        relay_base_url.trim_end_matches('/'),
+        session_id
+    );
+
+    let response = Client::new()
+        .post(url)
+        .bearer_auth(host_token)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to revoke Twin relay session: {e}"))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!(
+            "Twin relay session revoke failed ({status}): {body}"
+        ));
+    }
+
+    Ok(())
+}
+
 pub async fn run_host_relay(
     app: AppHandle,
     relay_session: RelayCreateResponse,
@@ -378,7 +407,7 @@ where
         &json!({
             "type": "host_event",
             "seq": event.seq,
-            "event": event.event,
+            "event": &event.event,
         }),
     )
     .await
