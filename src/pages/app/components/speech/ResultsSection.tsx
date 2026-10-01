@@ -1,11 +1,13 @@
 import { ChatConversation } from "@/types";
-import { Markdown, Switch, CopyButton } from "@/components";
-import { BotIcon, HeadphonesIcon, Loader2, SparklesIcon } from "lucide-react";
+import { Button, Markdown, Switch, CopyButton } from "@/components";
+import { BotIcon, HeadphonesIcon, Loader2, SendIcon, SparklesIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Props = {
   lastTranscription: string;
   lastAIResponse: string;
+  pendingManualQuestion: string;
+  onSubmitPending: () => Promise<void>;
   remoteComments: Array<{
     id: string;
     text: string;
@@ -20,6 +22,8 @@ type Props = {
 export const ResultsSection = ({
   lastTranscription,
   lastAIResponse,
+  pendingManualQuestion,
+  onSubmitPending,
   remoteComments,
   isAIProcessing,
   conversation,
@@ -64,9 +68,23 @@ export const ResultsSection = ({
         <div className="space-y-2">
           {/* System Input - Just text with bold label */}
           {lastTranscription && (
-            <p className="text-[11px] text-muted-foreground">
-              <span className="font-semibold">System:</span> {lastTranscription}
-            </p>
+            <div className="flex items-start justify-between gap-2">
+              <p className="text-[11px] text-muted-foreground flex-1">
+                <span className="font-semibold">System:</span> {lastTranscription}
+              </p>
+              {pendingManualQuestion && (
+                <Button
+                  size="sm"
+                  className="h-7 text-[10px] gap-1 px-2 shrink-0"
+                  onClick={() => void onSubmitPending()}
+                  disabled={isAIProcessing}
+                  title="Send detected speech to AI"
+                >
+                  <SendIcon className="h-3 w-3" />
+                  Send
+                </Button>
+              )}
+            </div>
           )}
 
           {remoteComments.length > 0 && (
@@ -144,11 +162,25 @@ export const ResultsSection = ({
           {/* System Input - Second */}
           {lastTranscription && (
             <div className="rounded-md border-l-2 border-primary/50 bg-primary/5 p-2.5">
-              <div className="flex items-center gap-1.5 mb-1">
-                <HeadphonesIcon className="h-3 w-3 text-primary" />
-                <span className="text-[9px] font-medium text-primary uppercase tracking-wide">
-                  System
-                </span>
+              <div className="flex items-center justify-between gap-2 mb-1">
+                <div className="flex items-center gap-1.5">
+                  <HeadphonesIcon className="h-3 w-3 text-primary" />
+                  <span className="text-[9px] font-medium text-primary uppercase tracking-wide">
+                    System
+                  </span>
+                </div>
+                {pendingManualQuestion && (
+                  <Button
+                    size="sm"
+                    className="h-7 text-[10px] gap-1 px-2"
+                    onClick={() => void onSubmitPending()}
+                    disabled={isAIProcessing}
+                    title="Send detected speech to AI"
+                  >
+                    <SendIcon className="h-3 w-3" />
+                    Send
+                  </Button>
+                )}
               </div>
               <p className="text-sm">{lastTranscription}</p>
             </div>
