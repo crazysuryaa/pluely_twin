@@ -5,6 +5,7 @@ import {
   SelectTrigger,
   Header,
   Button,
+  Switch,
 } from "@/components";
 import { MicIcon, RefreshCwIcon, HeadphonesIcon } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -16,7 +17,19 @@ import { invoke } from "@tauri-apps/api/core";
 export const AudioSelection = () => {
   const { selectedAudioDevices, setSelectedAudioDevices } = useApp();
 
+  const handleAutoSubmitChange = (enabled: boolean) => {
+    setAutoSubmitSpeech(enabled);
+    safeLocalStorage.setItem(
+      STORAGE_KEYS.SPEECH_SUBMIT_MODE,
+      enabled ? "auto" : "manual"
+    );
+  };
+
   const [isLoadingDevices, setIsLoadingDevices] = useState(false);
+  const [autoSubmitSpeech, setAutoSubmitSpeech] = useState(
+    () =>
+      safeLocalStorage.getItem(STORAGE_KEYS.SPEECH_SUBMIT_MODE) === "auto"
+  );
   const [showSuccess, setShowSuccess] = useState<{
     input: boolean;
     output: boolean;
@@ -132,6 +145,18 @@ export const AudioSelection = () => {
 
   return (
     <div id="audio" className="space-y-1 flex flex-col gap-4">
+      <div className="rounded-lg border border-border/70 p-4 flex items-center justify-between gap-4">
+        <div>
+          <div className="text-sm font-medium">Auto-submit detected speech</div>
+          <p className="text-xs text-muted-foreground mt-1">
+            Off means speech is transcribed first and waits for an explicit Send action.
+          </p>
+        </div>
+        <Switch
+          checked={autoSubmitSpeech}
+          onCheckedChange={handleAutoSubmitChange}
+        />
+      </div>
       {/* Microphone Input Section */}
       <div className="space-y-3">
         <Header
