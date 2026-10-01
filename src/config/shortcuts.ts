@@ -71,4 +71,24 @@ export const DEFAULT_SHORTCUT_ACTIONS: ShortcutAction[] = [
       linux: "ctrl+shift+s",
     },
   },
+  {
+    id: "scroll_chat_up",
+    name: "Scroll Chat Up",
+    description: "Scroll the Pluely response panel without scrolling the background app",
+    defaultKey: {
+      macos: "cmd+shift+up",
+      windows: "ctrl+shift+up",
+      linux: "ctrl+shift+up",
+    },
+  },
+  {
+    id: "scroll_chat_down",
+    name: "Scroll Chat Down",
+    description: "Scroll the Pluely response panel without scrolling the background app",
+    defaultKey: {
+      macos: "cmd+shift+down",
+      windows: "ctrl+shift+down",
+      linux: "ctrl+shift+down",
+    },
+  },
 ];
