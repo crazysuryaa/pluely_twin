@@ -70,6 +70,8 @@ export default function App() {
   const [status, setStatus] = useState("Disconnected");
   const [comment, setComment] = useState("");
   const [feed, setFeed] = useState<FeedItem[]>([]);
+  const [screenFrameUrl, setScreenFrameUrl] = useState<string | null>(null);
+  const [screenStatus, setScreenStatus] = useState("Waiting for Host screen share");
 
   const socketRef = useRef<WebSocket | null>(null);
   const connectionConfigRef = useRef<ConnectionConfig | null>(null);
@@ -77,6 +79,10 @@ export default function App() {
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<number | null>(null);
   const heartbeatTimerRef = useRef<number | null>(null);
+  const mediaSocketRef = useRef<WebSocket | null>(null);
+  const mediaReconnectTimerRef = useRef<number | null>(null);
+  const mediaReconnectAttemptRef = useRef(0);
+  const screenFrameUrlRef = useRef<string | null>(null);
   const lastPongAtRef = useRef(Date.now());
   const lastEventSeqRef = useRef(0);
   const pendingCommentsRef = useRef<Map<string, string>>(new Map());
@@ -88,6 +94,10 @@ export default function App() {
       manualDisconnectRef.current = true;
       clearReconnectTimer();
       clearHeartbeat();
+      clearMediaReconnectTimer();
+      mediaSocketRef.current?.close();
+      mediaSocketRef.current = null;
+      clearScreenFrame();
       socketRef.current?.close();
       socketRef.current = null;
     };
@@ -105,6 +115,183 @@ export default function App() {
       window.clearInterval(heartbeatTimerRef.current);
       heartbeatTimerRef.current = null;
     }
+  }
+
+  function clearMediaReconnectTimer() {
+    if (mediaReconnectTimerRef.current !== null) {
+      window.clearTimeout(mediaReconnectTimerRef.current);
+      mediaReconnectTimerRef.current = null;
+    }
+  }
+
+  function clearScreenFrame() {
+    const current = screenFrameUrlRef.current;
+    if (current) {
+      URL.revokeObjectURL(current);
+      screenFrameUrlRef.current = null;
+    }
+    setScreenFrameUrl(null);
+  }
+
+  function mediaWebSocketUrl(
+    config: Extract<ConnectionConfig, { mode: "relay" }>
+  ) {
+    return `${relayWsBase(config.relayBaseUrl)}/api/v1/ws/${encodeURIComponent(config.sessionId)}/media/commenter`;
+  }
+
+  function scheduleMediaReconnect(
+    config: Extract<ConnectionConfig, { mode: "relay" }>
+  ) {
+    if (manualDisconnectRef.current) return;
+
+    clearMediaReconnectTimer();
+    const attempt = mediaReconnectAttemptRef.current;
+    const delay = Math.min(1_000 * 2 ** attempt, MAX_RECONNECT_DELAY_MS);
+    mediaReconnectAttemptRef.current = attempt + 1;
+    setScreenStatus(
+      `Screen stream reconnecting in ${Math.ceil(delay / 1000)}s`
+    );
+
+    mediaReconnectTimerRef.current = window.setTimeout(() => {
+      if (!manualDisconnectRef.current) {
+        startMediaSocket(config, true);
+      }
+    }, delay);
+  }
+
+  function startMediaSocket(
+    config: Extract<ConnectionConfig, { mode: "relay" }>,
+    reconnecting = false
+  ) {
+    clearMediaReconnectTimer();
+
+    const existing = mediaSocketRef.current;
+    if (
+      existing &&
+      (existing.readyState === WebSocket.OPEN ||
+        existing.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
+
+    const socket = new WebSocket(mediaWebSocketUrl(config));
+    socket.binaryType = "arraybuffer";
+    mediaSocketRef.current = socket;
+    setScreenStatus(
+      reconnecting ? "Reconnecting screen stream…" : "Connecting screen stream…"
+    );
+
+    socket.onopen = () => {
+      if (mediaSocketRef.current !== socket) return;
+
+      socket.send(
+        JSON.stringify({
+          type: "authenticate",
+          token: config.token,
+          device_name: config.deviceName || null,
+          connection_id: `${clientConnectionIdRef.current}-media`,
+          last_event_seq: 0,
+        })
+      );
+    };
+
+    socket.onmessage = (event) => {
+      if (mediaSocketRef.current !== socket) return;
+
+      if (typeof event.data === "string") {
+        if (event.data === "ping") {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send("pong");
+          }
+          return;
+        }
+
+        if (event.data === "pong") {
+          return;
+        }
+
+        try {
+          const value = JSON.parse(event.data) as {
+            type?: string;
+            state?: string;
+          };
+
+          if (value.type === "authenticated") {
+            mediaReconnectAttemptRef.current = 0;
+            setScreenStatus("Waiting for Host screen share");
+            return;
+          }
+
+          if (value.type === "screen_status") {
+            if (value.state === "started") {
+              setScreenStatus("Host is sharing screen");
+            } else {
+              clearScreenFrame();
+              setScreenStatus("Screen share stopped");
+            }
+            return;
+          }
+
+          if (value.type === "authentication_failed") {
+            manualDisconnectRef.current = true;
+            setScreenStatus("Screen stream authentication failed");
+            socket.close();
+          }
+        } catch {
+          // Ignore unknown text messages on the media channel.
+        }
+        return;
+      }
+
+      const bytes =
+        event.data instanceof ArrayBuffer
+          ? event.data
+          : null;
+
+      if (!bytes || bytes.byteLength === 0) return;
+
+      const blob = new Blob([bytes], { type: "image/jpeg" });
+      const nextUrl = URL.createObjectURL(blob);
+      const previousUrl = screenFrameUrlRef.current;
+      screenFrameUrlRef.current = nextUrl;
+      setScreenFrameUrl(nextUrl);
+      setScreenStatus("Live");
+
+      if (previousUrl) {
+        URL.revokeObjectURL(previousUrl);
+      }
+    };
+
+    socket.onerror = () => {
+      if (mediaSocketRef.current !== socket) return;
+      try {
+        socket.close();
+      } catch {
+        scheduleMediaReconnect(config);
+      }
+    };
+
+    socket.onclose = () => {
+      if (mediaSocketRef.current !== socket) return;
+      mediaSocketRef.current = null;
+
+      if (manualDisconnectRef.current) return;
+      scheduleMediaReconnect(config);
+    };
+  }
+
+  function stopMediaSocket() {
+    clearMediaReconnectTimer();
+    const socket = mediaSocketRef.current;
+    mediaSocketRef.current = null;
+    try {
+      socket?.close();
+    } catch {
+      // Best effort.
+    }
+    mediaReconnectAttemptRef.current = 0;
+    clearScreenFrame();
+    setScreenStatus("Waiting for Host screen share");
   }
 
   function appendFeed(
@@ -397,6 +584,9 @@ export default function App() {
         );
         startHeartbeat(socket, config);
         flushPendingComments(socket);
+        if (config.mode === "relay") {
+          startMediaSocket(config);
+        }
         return;
       }
 
@@ -438,6 +628,7 @@ export default function App() {
         setConnected(false);
         setSessionActive(false);
         setStatus("Session expired");
+        stopMediaSocket();
         socket.close();
         return;
       }
@@ -536,6 +727,7 @@ export default function App() {
       reconnectAttemptRef.current = 0;
       clientConnectionIdRef.current = crypto.randomUUID();
       setFeed([]);
+      stopMediaSocket();
       setSessionId("");
       setHostConnected(true);
       openSocket(config, false);
@@ -550,6 +742,7 @@ export default function App() {
     manualDisconnectRef.current = true;
     clearReconnectTimer();
     clearHeartbeat();
+    stopMediaSocket();
 
     const socket = socketRef.current;
     socketRef.current = null;
@@ -762,7 +955,7 @@ export default function App() {
                     opacity: 0.7,
                   }}
                 >
-                  {hostConnected ? "Host connected" : "Host reconnecting"}
+                  {screenStatus}
                 </span>
               </div>
 
@@ -773,34 +966,48 @@ export default function App() {
                   minHeight: 520,
                   display: "grid",
                   placeItems: "center",
-                  padding: 24,
+                  overflow: "hidden",
                   color: "#d4d4d4",
                   background:
                     "radial-gradient(circle at center, #202020 0%, #111 72%)",
                   textAlign: "center",
                 }}
               >
-                <div style={{ maxWidth: 360 }}>
-                  <div
+                {screenFrameUrl ? (
+                  <img
+                    src={screenFrameUrl}
+                    alt="Live Host screen"
                     style={{
-                      fontSize: 18,
-                      fontWeight: 700,
-                      marginBottom: 8,
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "contain",
+                      display: "block",
+                      background: "#000",
                     }}
-                  >
-                    Screen share will appear here
+                  />
+                ) : (
+                  <div style={{ maxWidth: 360, padding: 24 }}>
+                    <div
+                      style={{
+                        fontSize: 18,
+                        fontWeight: 700,
+                        marginBottom: 8,
+                      }}
+                    >
+                      {screenStatus}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        lineHeight: 1.5,
+                        opacity: 0.72,
+                      }}
+                    >
+                      When the Host starts screen sharing, the primary monitor
+                      appears here automatically.
+                    </div>
                   </div>
-                  <div
-                    style={{
-                      fontSize: 13,
-                      lineHeight: 1.5,
-                      opacity: 0.72,
-                    }}
-                  >
-                    The two-column layout is ready. The live screen media
-                    transport is the next piece to connect to this surface.
-                  </div>
-                </div>
+                )}
               </div>
             </section>
 
