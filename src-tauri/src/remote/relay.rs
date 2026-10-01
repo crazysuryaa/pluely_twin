@@ -183,7 +183,7 @@ pub async fn run_host_relay(
                                 Err(_) => continue,
                             };
 
-                            match value.get("type").and_then(Value::as_str) {
+                            match value.get("type").and_then(|item| item.as_str()) {
                                 Some("ping") => {
                                     if send_json(
                                         &mut sink,
@@ -203,7 +203,7 @@ pub async fn run_host_relay(
                                 Some("comment") => {
                                     let comment_id = value
                                         .get("comment_id")
-                                        .and_then(Value::as_str)
+                                        .and_then(|item| item.as_str())
                                         .unwrap_or("")
                                         .to_string();
 
@@ -223,12 +223,12 @@ pub async fn run_host_relay(
                                             source: "Commenter".to_string(),
                                             text: value
                                                 .get("text")
-                                                .and_then(Value::as_str)
+                                                .and_then(|item| item.as_str())
                                                 .unwrap_or("")
                                                 .to_string(),
                                             device_name: value
                                                 .get("device_name")
-                                                .and_then(Value::as_str)
+                                                .and_then(|item| item.as_str())
                                                 .map(ToString::to_string),
                                         };
 
@@ -267,7 +267,7 @@ pub async fn run_host_relay(
                                 }
                                 Some("error") => {
                                     tracing::warn!(
-                                        message = %value.get("message").and_then(Value::as_str).unwrap_or("relay error"),
+                                        message = %value.get("message").and_then(|item| item.as_str()).unwrap_or("relay error"),
                                         "Twin relay reported an error"
                                     );
                                 }
