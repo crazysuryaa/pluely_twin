@@ -8,18 +8,15 @@ import {
   MonitorIcon,
   HomeIcon,
   PowerIcon,
-  MailIcon,
   CoffeeIcon,
   GlobeIcon,
   BugIcon,
   MessageSquareTextIcon,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { useApp } from "@/contexts";
 import { XIcon, GithubIcon } from "@/components";
 
 export const useMenuItems = () => {
-  const { hasActiveLicense } = useApp();
 
   const menu: {
     icon: React.ElementType;
@@ -76,19 +73,10 @@ export const useMenuItems = () => {
   ];
 
   const footerItems = [
-    ...(hasActiveLicense
-      ? [
-          {
-            icon: MailIcon,
-            label: "Contact Support",
-            href: "mailto:support@pluely.com",
-          },
-        ]
-      : []),
     {
       icon: BugIcon,
       label: "Report a bug",
-      href: "https://github.com/iamsrikanthnani/pluely/issues/new?template=bug-report.yml",
+      href: "https://github.com/crazysuryaa/pluely_twin/issues/new",
     },
     {
       icon: PowerIcon,
@@ -112,7 +100,7 @@ export const useMenuItems = () => {
     {
       title: "Github",
       icon: GithubIcon,
-      link: "https://github.com/iamsrikanthnani/pluely",
+      link: "https://github.com/crazysuryaa/pluely_twin",
     },
     {
       title: "Buy Me a Coffee",
