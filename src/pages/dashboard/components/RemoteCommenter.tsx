@@ -3,8 +3,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Button, Input } from "@/components";
 import { CheckIcon, CopyIcon, Globe2Icon, WifiIcon } from "lucide-react";
+import { getItem, saveItem, removeItem } from "tauri-plugin-keychain";
 
 const RELAY_URL_KEY = "twin-relay-url";
+const RELAY_CREATE_KEY_KEYCHAIN = "pluely-twin-relay-create-key";
+const DEFAULT_RELAY_URL =
+  import.meta.env.VITE_TWIN_RELAY_URL ||
+  "https://pluely-twin-relay.karta-testing.workers.dev";
 
 type SessionInfo = {
   active: boolean;
@@ -42,12 +47,11 @@ export const RemoteCommenter = () => {
   const [connections, setConnections] = useState<ConnectionEvent[]>([]);
   const [relayStatus, setRelayStatus] = useState<RelayStatus | null>(null);
   const [relayUrl, setRelayUrl] = useState(
-    () =>
-      localStorage.getItem(RELAY_URL_KEY) ||
-      import.meta.env.VITE_TWIN_RELAY_URL ||
-      ""
+    () => localStorage.getItem(RELAY_URL_KEY) || DEFAULT_RELAY_URL
   );
   const [relayCreateKey, setRelayCreateKey] = useState("");
+  const [rememberRelayCreateKey, setRememberRelayCreateKey] = useState(true);
+  const [keyLoaded, setKeyLoaded] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [starting, setStarting] = useState<"relay" | "lan" | null>(null);
   const [copied, setCopied] = useState(false);
@@ -57,6 +61,18 @@ export const RemoteCommenter = () => {
     invoke<SessionInfo | null>("get_remote_commenter_status")
       .then(setSession)
       .catch(() => setSession(null));
+
+    getItem(RELAY_CREATE_KEY_KEYCHAIN)
+      .then((savedKey) => {
+        if (savedKey) {
+          setRelayCreateKey(savedKey);
+          setRememberRelayCreateKey(true);
+        }
+      })
+      .catch(() => {
+        // Keychain may be unavailable on some development environments.
+      })
+      .finally(() => setKeyLoaded(true));
 
     const stopComment = listen<RemoteComment>("remote-comment", (event) => {
       setComments((current) => [...current.slice(-99), event.payload]);
@@ -122,6 +138,17 @@ export const RemoteCommenter = () => {
       return;
     }
 
+    if (!keyLoaded) {
+      setError("Secure relay settings are still loading. Try again in a moment.");
+      return;
+    }
+
+    if (!relayCreateKey.trim()) {
+      setError("Enter the relay create key once. It can be remembered securely after that.");
+      setShowAdvanced(true);
+      return;
+    }
+
     setStarting("relay");
     setConnections([]);
     setRelayStatus({ status: "connecting" });
@@ -133,9 +160,19 @@ export const RemoteCommenter = () => {
         "start_remote_commenter_relay",
         {
           relayBaseUrl: normalizedRelayUrl,
-          createKey: relayCreateKey.trim() || null,
+          createKey: relayCreateKey.trim(),
         }
       );
+
+      if (rememberRelayCreateKey) {
+        await saveItem(
+          RELAY_CREATE_KEY_KEYCHAIN,
+          relayCreateKey.trim()
+        );
+      } else {
+        await removeItem(RELAY_CREATE_KEY_KEYCHAIN).catch(() => undefined);
+      }
+
       setSession(next);
     } catch (e) {
       setRelayStatus(null);
@@ -251,7 +288,7 @@ export const RemoteCommenter = () => {
                 <Input
                   value={relayUrl}
                   onChange={(event) => setRelayUrl(event.target.value)}
-                  placeholder="https://your-twin-relay.run.app"
+                  placeholder="https://your-relay.workers.dev"
                 />
               </label>
 
@@ -265,9 +302,25 @@ export const RemoteCommenter = () => {
                   onChange={(event) =>
                     setRelayCreateKey(event.target.value)
                   }
-                  placeholder="Optional if your relay does not require one"
+                  placeholder="Enter once"
                 />
               </label>
+
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={rememberRelayCreateKey}
+                  onChange={(event) =>
+                    setRememberRelayCreateKey(event.target.checked)
+                  }
+                />
+                Remember create key securely on this computer
+              </label>
+
+              <p className="text-[10px] text-muted-foreground">
+                The relay URL is preconfigured. The create key is stored in the
+                operating system keychain, not browser local storage.
+              </p>
 
               <div className="border-t border-border/50 pt-3">
                 <Button
