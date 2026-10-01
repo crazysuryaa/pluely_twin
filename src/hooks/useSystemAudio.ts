@@ -63,6 +63,13 @@ export interface ChatConversation {
   updatedAt: number;
 }
 
+export interface RemoteComment {
+  id: string;
+  source: string;
+  text: string;
+  device_name?: string | null;
+}
+
 export type useSystemAudioType = ReturnType<typeof useSystemAudio>;
 
 export function useSystemAudio() {
@@ -74,6 +81,7 @@ export function useSystemAudio() {
   const [isAIProcessing, setIsAIProcessing] = useState(false);
   const [lastTranscription, setLastTranscription] = useState<string>("");
   const [lastAIResponse, setLastAIResponse] = useState<string>("");
+  const [remoteComments, setRemoteComments] = useState<RemoteComment[]>([]);
   const [error, setError] = useState<string>("");
   const [setupRequired, setSetupRequired] = useState<boolean>(false);
   const [quickActions, setQuickActions] = useState<string[]>([]);
@@ -110,6 +118,33 @@ export function useSystemAudio() {
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isSavingRef = useRef<boolean>(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let remoteCommentUnlisten: (() => void) | undefined;
+
+    const setupRemoteCommentListener = async () => {
+      try {
+        remoteCommentUnlisten = await listen<RemoteComment>(
+          "remote-comment",
+          (event) => {
+            setRemoteComments((current) => [
+              ...current.slice(-49),
+              event.payload,
+            ]);
+            setIsPopoverOpen(true);
+          }
+        );
+      } catch (err) {
+        console.error("Failed to setup remote commenter listener:", err);
+      }
+    };
+
+    setupRemoteCommentListener();
+
+    return () => {
+      if (remoteCommentUnlisten) remoteCommentUnlisten();
+    };
+  }, []);
 
   // Load context settings and VAD config from localStorage on mount
   useEffect(() => {
@@ -275,6 +310,14 @@ export function useSystemAudio() {
               if (transcription.trim()) {
                 setLastTranscription(transcription);
                 setError("");
+
+                void invoke("publish_host_event", {
+                  event: {
+                    type: "speaker_final",
+                    speaker: "System",
+                    text: transcription,
+                  },
+                }).catch(() => {});
 
                 const effectiveSystemPrompt = useSystemPrompt
                   ? systemPrompt || DEFAULT_SYSTEM_PROMPT
@@ -512,12 +555,26 @@ export function useSystemAudio() {
           })) {
             fullResponse += chunk;
             setLastAIResponse((prev) => prev + chunk);
+
+            void invoke("publish_host_event", {
+              event: {
+                type: "assistant_delta",
+                text: chunk,
+              },
+            }).catch(() => {});
           }
         } catch (aiError: any) {
           setError(aiError.message || "Failed to get AI response");
         }
 
         if (fullResponse) {
+          void invoke("publish_host_event", {
+            event: {
+              type: "assistant_complete",
+              text: fullResponse,
+            },
+          }).catch(() => {});
+
           const timestamp = Date.now();
           setConversation((prev) => ({
             ...prev,
@@ -575,6 +632,13 @@ export function useSystemAudio() {
 
       setCapturing(true);
       setIsPopoverOpen(true);
+
+      void invoke("publish_host_event", {
+        event: {
+          type: "session_state",
+          state: "capturing",
+        },
+      }).catch(() => {});
       setIsContinuousMode(isContinuous);
       setRecordingProgress(0);
 
@@ -618,6 +682,14 @@ export function useSystemAudio() {
 
       // Reset ALL states
       setCapturing(false);
+
+      void invoke("publish_host_event", {
+        event: {
+          type: "session_state",
+          state: "stopped",
+        },
+      }).catch(() => {});
+
       setIsProcessing(false);
       setIsAIProcessing(false);
       setIsContinuousMode(false);
@@ -686,6 +758,7 @@ export function useSystemAudio() {
       setupRequired ||
       isAIProcessing ||
       !!lastAIResponse ||
+      remoteComments.length > 0 ||
       !!error;
     setIsPopoverOpen(shouldOpenPopover);
     resizeWindow(shouldOpenPopover);
@@ -694,6 +767,7 @@ export function useSystemAudio() {
     setupRequired,
     isAIProcessing,
     lastAIResponse,
+    remoteComments.length,
     error,
     resizeWindow,
   ]);
@@ -773,6 +847,7 @@ export function useSystemAudio() {
     });
     setLastTranscription("");
     setLastAIResponse("");
+    setRemoteComments([]);
     setError("");
     setSetupRequired(false);
     setIsProcessing(false);
@@ -884,6 +959,7 @@ export function useSystemAudio() {
     isAIProcessing,
     lastTranscription,
     lastAIResponse,
+    remoteComments,
     error,
     setupRequired,
     startCapture,
