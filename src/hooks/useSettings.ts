@@ -16,8 +16,7 @@ export const useSettings = () => {
     selectedAIProvider,
     selectedSttProvider,
     onSetSelectedAIProvider,
-    onSetSelectedSttProvider,
-    hasActiveLicense,
+    onSetSelectedSttProvider
   } = useApp();
   const [variables, setVariables] = useState<{ key: string; value: string }[]>(
     []
@@ -50,9 +49,6 @@ export const useSettings = () => {
   };
 
   const handleScreenshotEnabledChange = (enabled: boolean) => {
-    if (!enabled && !hasActiveLicense) {
-      return;
-    }
     const newConfig = { ...screenshotConfiguration, enabled };
     setScreenshotConfiguration(newConfig);
     safeLocalStorage.setItem(
@@ -110,7 +106,6 @@ export const useSettings = () => {
     showDeleteConfirmDialog,
     setShowDeleteConfirmDialog,
     variables,
-    sttVariables,
-    hasActiveLicense,
+    sttVariables
   };
 };
