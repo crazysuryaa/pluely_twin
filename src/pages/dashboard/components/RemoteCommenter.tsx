@@ -5,7 +5,6 @@ import { Button, Input } from "@/components";
 import { CheckIcon, CopyIcon, Globe2Icon, WifiIcon } from "lucide-react";
 
 const RELAY_URL_KEY = "twin-relay-url";
-const RELAY_CREATE_KEY = "twin-relay-create-key";
 
 type SessionInfo = {
   active: boolean;
@@ -48,9 +47,7 @@ export const RemoteCommenter = () => {
       import.meta.env.VITE_TWIN_RELAY_URL ||
       ""
   );
-  const [relayCreateKey, setRelayCreateKey] = useState(
-    () => localStorage.getItem(RELAY_CREATE_KEY) || ""
-  );
+  const [relayCreateKey, setRelayCreateKey] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [starting, setStarting] = useState<"relay" | "lan" | null>(null);
   const [copied, setCopied] = useState(false);
@@ -130,7 +127,6 @@ export const RemoteCommenter = () => {
     setRelayStatus({ status: "connecting" });
 
     localStorage.setItem(RELAY_URL_KEY, normalizedRelayUrl);
-    localStorage.setItem(RELAY_CREATE_KEY, relayCreateKey);
 
     try {
       const next = await invoke<SessionInfo>(
