@@ -235,11 +235,11 @@ export const SettingsPanel = ({
 
             <div className="flex items-center justify-between gap-4">
               <div className="flex-1">
-                <Label className="text-xs font-medium">Use System Prompt</Label>
+                <Label className="text-xs font-medium">
+                  Include Saved System Prompt
+                </Label>
                 <p className="text-[10px] text-muted-foreground mt-0.5">
-                  {useSystemPrompt
-                    ? "Using default prompt from settings"
-                    : "Using custom context below"}
+                  Keep your saved behavior/style instructions and layer session context below.
                 </p>
               </div>
               <Switch
@@ -248,44 +248,46 @@ export const SettingsPanel = ({
               />
             </div>
 
-            {/* Custom Context */}
-            {!useSystemPrompt && (
-              <div className="space-y-2">
-                <div className="flex justify-end">
-                  <Select
-                    value={selectedTemplate}
-                    onValueChange={handleTemplateSelection}
-                  >
-                    <SelectTrigger className="w-auto h-7 text-xs">
-                      <WandIcon className="w-3 h-3 mr-1.5" />
-                      <SelectValue placeholder="Templates" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectLabel className="text-xs py-1">
-                          Quick-fill a template
-                        </SelectLabel>
-                        {PROMPT_TEMPLATES.map((template) => (
-                          <SelectItem
-                            key={template.id}
-                            value={template.id}
-                            className="text-xs"
-                          >
-                            {template.name}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Textarea
-                  placeholder="Enter custom system prompt and context..."
-                  value={contextContent}
-                  onChange={(e) => setContextContent(e.target.value)}
-                  className="min-h-24 resize-none text-xs"
-                />
+            {/* Session Context */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-medium">Session Context / Evidence</Label>
+                <Select
+                  value={selectedTemplate}
+                  onValueChange={handleTemplateSelection}
+                >
+                  <SelectTrigger className="w-auto h-7 text-xs">
+                    <WandIcon className="w-3 h-3 mr-1.5" />
+                    <SelectValue placeholder="Templates" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      <SelectLabel className="text-xs py-1">
+                        Quick-fill a template
+                      </SelectLabel>
+                      {PROMPT_TEMPLATES.map((template) => (
+                        <SelectItem
+                          key={template.id}
+                          value={template.id}
+                          className="text-xs"
+                        >
+                          {template.name}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
               </div>
-            )}
+              <Textarea
+                placeholder="Add session-specific context such as meeting goals, resume details, requirements, notes, or evidence..."
+                value={contextContent}
+                onChange={(e) => setContextContent(e.target.value)}
+                className="min-h-28 resize-y text-xs"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                This is layered with the saved system prompt when enabled and persists locally.
+              </p>
+            </div>
           </div>
 
           {/* Advanced Settings Toggle */}
