@@ -212,7 +212,13 @@ export class TwinSession extends DurableObject<Env> {
 
     if (attachment?.authenticated) {
       if (attachment.role === "host") {
-        this.broadcastToRole("commenter", { type: "host_disconnected" });
+        const replacementHostExists = this.getSocketsByRole("host").some(
+          (candidate) => candidate !== ws,
+        );
+
+        if (!replacementHostExists) {
+          this.broadcastToRole("commenter", { type: "host_disconnected" });
+        }
       } else {
         this.broadcastToRole("host", {
           type: "commenter_disconnected",
@@ -233,8 +239,22 @@ export class TwinSession extends DurableObject<Env> {
     const attachment =
       ws.deserializeAttachment() as SocketAttachment | null;
 
-    if (attachment?.authenticated && attachment.role === "host") {
-      this.broadcastToRole("commenter", { type: "host_disconnected" });
+    if (!attachment?.authenticated) return;
+
+    if (attachment.role === "host") {
+      const replacementHostExists = this.getSocketsByRole("host").some(
+        (candidate) => candidate !== ws,
+      );
+
+      if (!replacementHostExists) {
+        this.broadcastToRole("commenter", { type: "host_disconnected" });
+      }
+    } else {
+      this.broadcastToRole("host", {
+        type: "commenter_disconnected",
+        connection_id: attachment.connectionId,
+        device_name: attachment.deviceName ?? null,
+      });
     }
   }
 
