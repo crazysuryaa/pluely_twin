@@ -119,17 +119,3 @@ export async function verifySessionToken(
     return false;
   }
 }
-
-export function constantTimeEqual(a: string, b: string): boolean {
-  const left = encoder.encode(a);
-  const right = encoder.encode(b);
-
-  if (left.length !== right.length) return false;
-
-  let diff = 0;
-  for (let index = 0; index < left.length; index += 1) {
-    diff |= left[index] ^ right[index];
-  }
-
-  return diff === 0;
-}
