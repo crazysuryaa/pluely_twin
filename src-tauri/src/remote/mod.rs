@@ -24,11 +24,13 @@ pub struct RemoteState {
 #[derive(Default)]
 struct RemoteInner {
     task: Option<JoinHandle<()>>,
+    screen_task: Option<JoinHandle<()>>,
     outbound: Option<broadcast::Sender<SequencedHostEvent>>,
     history: Option<server::SharedEventHistory>,
     dedupe: Option<server::SharedCommentDedupe>,
     next_seq: u64,
     relay_close: Option<RelayCloseInfo>,
+    relay_media: Option<RelayMediaInfo>,
     session: Option<RemoteSessionInfo>,
 }
 
@@ -48,6 +50,12 @@ pub struct RemoteSessionInfo {
 struct RelayCloseInfo {
     relay_base_url: String,
     session_id: String,
+    host_token: String,
+}
+
+#[derive(Debug, Clone)]
+struct RelayMediaInfo {
+    host_ws_url: String,
     host_token: String,
 }
 
@@ -147,11 +155,13 @@ pub async fn start_remote_commenter(
             .map_err(|_| "Remote state lock poisoned".to_string())?;
 
         inner.task = Some(task);
+        inner.screen_task = None;
         inner.outbound = Some(tx);
         inner.history = Some(history);
         inner.dedupe = Some(dedupe);
         inner.next_seq = 0;
         inner.relay_close = None;
+        inner.relay_media = None;
         inner.session = Some(info.clone());
     }
 
@@ -216,6 +226,7 @@ pub async fn start_remote_commenter_relay(
             .map_err(|_| "Remote state lock poisoned".to_string())?;
 
         inner.task = Some(task);
+        inner.screen_task = None;
         inner.outbound = Some(tx);
         inner.history = Some(history);
         inner.dedupe = None;
@@ -223,6 +234,10 @@ pub async fn start_remote_commenter_relay(
         inner.relay_close = Some(RelayCloseInfo {
             relay_base_url: relay_base_url.clone(),
             session_id: relay_session.session_id.clone(),
+            host_token: relay_session.host_token.clone(),
+        });
+        inner.relay_media = Some(RelayMediaInfo {
+            host_ws_url: relay_session.host_ws_url.clone(),
             host_token: relay_session.host_token.clone(),
         });
         inner.session = Some(info.clone());
@@ -233,31 +248,148 @@ pub async fn start_remote_commenter_relay(
 }
 
 #[tauri::command]
+pub async fn start_remote_screen_share(
+    app: AppHandle,
+    state: State<'_, RemoteState>,
+) -> Result<(), String> {
+    let media = {
+        let mut inner = state
+            .inner
+            .lock()
+            .map_err(|_| "Remote state lock poisoned".to_string())?;
+
+        if let Some(existing) = inner.screen_task.as_ref() {
+            if !existing.is_finished() {
+                return Ok(());
+            }
+        }
+        inner.screen_task = None;
+
+        let session = inner
+            .session
+            .as_ref()
+            .ok_or_else(|| "Start a remote commenter session first".to_string())?;
+
+        if session.mode != "relay" {
+            return Err(
+                "Live screen streaming currently requires Worldwide relay mode."
+                    .to_string(),
+            );
+        }
+
+        inner
+            .relay_media
+            .clone()
+            .ok_or_else(|| "Relay media session is not available".to_string())?
+    };
+
+    let app_for_task = app.clone();
+    let task = tokio::spawn(async move {
+        if let Err(error) = relay::run_host_screen_stream(
+            app_for_task.clone(),
+            media.host_ws_url,
+            media.host_token,
+        )
+        .await
+        {
+            tracing::error!(%error, "Twin screen stream stopped");
+            let _ = app_for_task.emit(
+                "remote-screen-share-status",
+                serde_json::json!({
+                    "status": "error",
+                    "error": error,
+                }),
+            );
+        }
+    });
+
+    let mut inner = state
+        .inner
+        .lock()
+        .map_err(|_| "Remote state lock poisoned".to_string())?;
+    inner.screen_task = Some(task);
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn stop_remote_screen_share(
+    app: AppHandle,
+    state: State<'_, RemoteState>,
+) -> Result<(), String> {
+    let task = {
+        let mut inner = state
+            .inner
+            .lock()
+            .map_err(|_| "Remote state lock poisoned".to_string())?;
+        inner.screen_task.take()
+    };
+
+    if let Some(task) = task {
+        task.abort();
+    }
+
+    let _ = app.emit(
+        "remote-screen-share-status",
+        serde_json::json!({ "status": "stopped" }),
+    );
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_remote_screen_share_status(
+    state: State<'_, RemoteState>,
+) -> Result<bool, String> {
+    let inner = state
+        .inner
+        .lock()
+        .map_err(|_| "Remote state lock poisoned".to_string())?;
+
+    Ok(inner
+        .screen_task
+        .as_ref()
+        .map(|task| !task.is_finished())
+        .unwrap_or(false))
+}
+
+#[tauri::command]
 pub async fn stop_remote_commenter(
     app: AppHandle,
     state: State<'_, RemoteState>,
 ) -> Result<(), String> {
-    let (task, relay_close) = {
+    let (task, screen_task, relay_close) = {
         let mut inner = state
             .inner
             .lock()
             .map_err(|_| "Remote state lock poisoned".to_string())?;
 
         let task = inner.task.take();
+        let screen_task = inner.screen_task.take();
         let relay_close = inner.relay_close.take();
 
         inner.outbound = None;
         inner.history = None;
         inner.dedupe = None;
         inner.next_seq = 0;
+        inner.relay_media = None;
         inner.session = None;
 
-        (task, relay_close)
+        (task, screen_task, relay_close)
     };
 
     if let Some(task) = task {
         task.abort();
     }
+
+    if let Some(screen_task) = screen_task {
+        screen_task.abort();
+    }
+
+    let _ = app.emit(
+        "remote-screen-share-status",
+        serde_json::json!({ "status": "stopped" }),
+    );
 
     if let Some(close) = relay_close {
         if let Err(error) = relay::close_relay_session(
