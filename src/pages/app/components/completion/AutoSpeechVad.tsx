@@ -35,6 +35,11 @@ const AutoSpeechVADInternal = ({
     additionalAudioConstraints: audioConstraints,
     onSpeechEnd: async (audio) => {
       try {
+        const durationSeconds = audio.length / 16000;
+        if (durationSeconds < 0.45) {
+          return;
+        }
+
         // convert float32array to blob
         const audioBlob = floatArrayToWav(audio, 16000, "wav");
 
