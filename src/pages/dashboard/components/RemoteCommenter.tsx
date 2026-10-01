@@ -240,13 +240,13 @@ export const RemoteCommenter = () => {
             className="text-xs text-muted-foreground hover:text-foreground"
             onClick={() => setShowAdvanced((value) => !value)}
           >
-            {showAdvanced ? "Hide connection settings" : "Connection settings"}
+            {showAdvanced ? "Hide advanced settings" : "Advanced connection settings"}
           </button>
 
           {showAdvanced ? (
             <div className="rounded-md border border-border/60 bg-muted/20 p-3 space-y-3">
               <label className="space-y-1 block">
-                <span className="text-xs font-medium">Twin Relay URL</span>
+                <span className="text-xs font-medium">Twin Relay URL override</span>
                 <Input
                   value={relayUrl}
                   onChange={(event) => setRelayUrl(event.target.value)}
