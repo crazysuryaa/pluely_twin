@@ -37,14 +37,16 @@ export interface VadConfig {
 const DEFAULT_VAD_CONFIG: VadConfig = {
   enabled: true,
   hop_size: 1024,
-  sensitivity_rms: 0.012, // Much less sensitive - only real speech
-  peak_threshold: 0.035, // Higher threshold - filters clicks/noise
-  silence_chunks: 45, // ~1.0s of required silence
-  min_speech_chunks: 7, // ~0.16s - captures short answers
-  pre_speech_chunks: 12, // ~0.27s - enough to catch word start
-  noise_gate_threshold: 0.003, // Stronger noise filtering
-  max_recording_duration_secs: 180, // 3 minutes default
+  sensitivity_rms: 0.014,
+  peak_threshold: 0.05,
+  silence_chunks: 55,
+  min_speech_chunks: 18,
+  pre_speech_chunks: 12,
+  noise_gate_threshold: 0.004,
+  max_recording_duration_secs: 180,
 };
+
+const TRANSCRIPT_SETTLE_MS = 650;
 
 // Chat message interface (reusing from useCompletion)
 interface ChatMessage {
@@ -118,6 +120,11 @@ export function useSystemAudio() {
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isSavingRef = useRef<boolean>(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const pendingTranscriptRef = useRef<string>("");
+  const pendingTranscriptTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const processWithAIRef = useRef<
+    ((transcription: string, prompt: string, previousMessages: Message[]) => Promise<void>) | null
+  >(null);
 
   useEffect(() => {
     let remoteCommentUnlisten: (() => void) | undefined;
@@ -308,30 +315,48 @@ export function useSystemAudio() {
               ]);
 
               if (transcription.trim()) {
-                setLastTranscription(transcription);
+                const cleanTranscription = transcription.trim();
+                pendingTranscriptRef.current = pendingTranscriptRef.current
+                  ? `${pendingTranscriptRef.current} ${cleanTranscription}`
+                  : cleanTranscription;
+
+                setLastTranscription(pendingTranscriptRef.current);
                 setError("");
 
-                void invoke("publish_host_event", {
-                  event: {
-                    type: "speaker_final",
-                    speaker: "System",
-                    text: transcription,
-                  },
-                }).catch(() => {});
+                if (pendingTranscriptTimerRef.current) {
+                  clearTimeout(pendingTranscriptTimerRef.current);
+                }
 
-                const effectiveSystemPrompt = useSystemPrompt
-                  ? systemPrompt || DEFAULT_SYSTEM_PROMPT
-                  : contextContent || DEFAULT_SYSTEM_PROMPT;
+                pendingTranscriptTimerRef.current = setTimeout(async () => {
+                  const mergedTranscription = pendingTranscriptRef.current.trim();
+                  pendingTranscriptRef.current = "";
+                  pendingTranscriptTimerRef.current = null;
 
-                const previousMessages = conversation.messages.map((msg) => {
-                  return { role: msg.role, content: msg.content };
-                });
+                  if (!mergedTranscription) return;
 
-                await processWithAI(
-                  transcription,
-                  effectiveSystemPrompt,
-                  previousMessages
-                );
+                  void invoke("publish_host_event", {
+                    event: {
+                      type: "speaker_final",
+                      speaker: "System",
+                      text: mergedTranscription,
+                    },
+                  }).catch(() => {});
+
+                  const effectiveSystemPrompt = useSystemPrompt
+                    ? systemPrompt || DEFAULT_SYSTEM_PROMPT
+                    : contextContent || DEFAULT_SYSTEM_PROMPT;
+
+                  const previousMessages = conversation.messages.map((msg) => ({
+                    role: msg.role,
+                    content: msg.content,
+                  }));
+
+                  await processWithAIRef.current?.(
+                    mergedTranscription,
+                    effectiveSystemPrompt,
+                    previousMessages
+                  );
+                }, TRANSCRIPT_SETTLE_MS);
               } else {
                 setError("Received empty transcription");
               }
@@ -361,6 +386,9 @@ export function useSystemAudio() {
     selectedSttProvider,
     allSttProviders,
     conversation.messages.length,
+    useSystemPrompt,
+    systemPrompt,
+    contextContent,
   ]);
 
   // Context management functions
@@ -456,7 +484,7 @@ export function useSystemAudio() {
         // Update conversation state with the latest transcription
         setConversation((prev) => ({
           ...prev,
-          messages: [userMessage, ...prev.messages],
+          messages: [...prev.messages, userMessage],
           updatedAt: timestamp,
           title: prev.title || generateConversationTitle(lastTranscription),
         }));
@@ -525,10 +553,10 @@ export function useSystemAudio() {
 
       try {
         setIsAIProcessing(true);
-        setLastAIResponse("");
         setError("");
 
         let fullResponse = "";
+        let isFirstChunk = true;
 
         const usePluelyAPI = await shouldUsePluelyAPI();
         if (!selectedAIProvider.provider && !usePluelyAPI) {
@@ -554,7 +582,12 @@ export function useSystemAudio() {
             imagesBase64: [],
           })) {
             fullResponse += chunk;
-            setLastAIResponse((prev) => prev + chunk);
+            if (isFirstChunk) {
+              setLastAIResponse(chunk);
+              isFirstChunk = false;
+            } else {
+              setLastAIResponse((prev) => prev + chunk);
+            }
 
             void invoke("publish_host_event", {
               event: {
@@ -579,6 +612,7 @@ export function useSystemAudio() {
           setConversation((prev) => ({
             ...prev,
             messages: [
+              ...prev.messages,
               {
                 id: generateMessageId("user", timestamp),
                 role: "user" as const,
@@ -591,7 +625,6 @@ export function useSystemAudio() {
                 content: fullResponse,
                 timestamp: timestamp + 1,
               },
-              ...prev.messages,
             ],
             updatedAt: timestamp,
             title: prev.title || generateConversationTitle(transcription),
@@ -604,8 +637,10 @@ export function useSystemAudio() {
         // No auto-restart - user manually controls when to start next recording
       }
     },
-    [selectedAIProvider, allAiProviders, conversation.messages]
+    [selectedAIProvider, allAiProviders]
   );
+
+  processWithAIRef.current = processWithAI;
 
   const startCapture = useCallback(async () => {
     try {
@@ -679,6 +714,12 @@ export function useSystemAudio() {
 
       // Stop the audio capture
       await invoke<string>("stop_system_audio_capture");
+
+      if (pendingTranscriptTimerRef.current) {
+        clearTimeout(pendingTranscriptTimerRef.current);
+        pendingTranscriptTimerRef.current = null;
+      }
+      pendingTranscriptRef.current = "";
 
       // Reset ALL states
       setCapturing(false);
@@ -787,6 +828,9 @@ export function useSystemAudio() {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
+      if (pendingTranscriptTimerRef.current) {
+        clearTimeout(pendingTranscriptTimerRef.current);
+      }
       invoke("stop_system_audio_capture").catch(() => {});
     };
   }, []);
@@ -838,6 +882,12 @@ export function useSystemAudio() {
   ]);
 
   const startNewConversation = useCallback(() => {
+    if (pendingTranscriptTimerRef.current) {
+      clearTimeout(pendingTranscriptTimerRef.current);
+      pendingTranscriptTimerRef.current = null;
+    }
+    pendingTranscriptRef.current = "";
+
     setConversation({
       id: generateConversationId("sysaudio"),
       title: "",
