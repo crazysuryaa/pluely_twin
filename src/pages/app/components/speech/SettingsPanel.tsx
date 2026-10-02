@@ -4,27 +4,21 @@ import {
   Label,
   Slider,
   Switch,
-  Textarea,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-  SelectLabel,
-  SelectGroup,
 } from "@/components";
 import {
   ChevronDownIcon,
-  WandIcon,
   RotateCcwIcon,
   ChevronUpIcon,
 } from "lucide-react";
 import { VadConfig } from "@/hooks/useSystemAudio";
-import {
-  PROMPT_TEMPLATES,
-  getPromptTemplateById,
-} from "@/lib/platform-instructions";
 import { cn } from "@/lib/utils";
+import { SessionDocuments } from "./SessionDocuments";
+import type { SystemPrompt } from "@/types";
 
 // Sensitivity presets for simpler UX
 const SENSITIVITY_PRESETS = {
@@ -66,8 +60,10 @@ interface SettingsPanelProps {
   // Context settings
   useSystemPrompt: boolean;
   setUseSystemPrompt: (value: boolean) => void;
-  contextContent: string;
-  setContextContent: (content: string) => void;
+  // Saved system prompts (from the System Prompts page)
+  savedPrompts?: SystemPrompt[];
+  selectedPromptId?: number | null;
+  onSelectPrompt?: (prompt: SystemPrompt) => void;
 }
 
 export const SettingsPanel = ({
@@ -75,11 +71,11 @@ export const SettingsPanel = ({
   onUpdateVadConfig,
   useSystemPrompt,
   setUseSystemPrompt,
-  contextContent,
-  setContextContent,
+  savedPrompts = [],
+  selectedPromptId = null,
+  onSelectPrompt,
 }: SettingsPanelProps) => {
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [selectedTemplate, setSelectedTemplate] = useState<string>("");
 
   // Determine current sensitivity preset based on values
   const getCurrentPreset = (): SensitivityPreset | "custom" => {
@@ -108,14 +104,6 @@ export const SettingsPanel = ({
       min_speech_chunks: presetValues.min_speech_chunks,
       silence_chunks: presetValues.silence_chunks,
     });
-  };
-
-  const handleTemplateSelection = (templateId: string) => {
-    const template = getPromptTemplateById(templateId);
-    if (template) {
-      setContextContent(template.prompt);
-      setSelectedTemplate("");
-    }
   };
 
   const handleResetDefaults = () => {
@@ -225,46 +213,37 @@ export const SettingsPanel = ({
               />
             </div>
 
-            {/* Session Context */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label className="text-xs font-medium">Session Context / Evidence</Label>
+            {useSystemPrompt && (
+              <div className="flex items-center justify-between gap-4">
+                <Label className="text-xs font-medium shrink-0">Saved system prompt</Label>
                 <Select
-                  value={selectedTemplate}
-                  onValueChange={handleTemplateSelection}
+                  value={selectedPromptId ? String(selectedPromptId) : ""}
+                  onValueChange={(value) => {
+                    const prompt = savedPrompts.find((p) => String(p.id) === value);
+                    if (prompt) onSelectPrompt?.(prompt);
+                  }}
+                  disabled={savedPrompts.length === 0}
                 >
-                  <SelectTrigger className="w-auto h-7 text-xs">
-                    <WandIcon className="w-3 h-3 mr-1.5" />
-                    <SelectValue placeholder="Templates" />
+                  <SelectTrigger className="h-7 min-w-0 max-w-[60%] text-xs">
+                    <SelectValue
+                      placeholder={
+                        savedPrompts.length === 0 ? "No saved prompts (default used)" : "Choose a prompt"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectGroup>
-                      <SelectLabel className="text-xs py-1">
-                        Quick-fill a template
-                      </SelectLabel>
-                      {PROMPT_TEMPLATES.map((template) => (
-                        <SelectItem
-                          key={template.id}
-                          value={template.id}
-                          className="text-xs"
-                        >
-                          {template.name}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
+                    {savedPrompts.map((prompt) => (
+                      <SelectItem key={prompt.id} value={String(prompt.id)} className="text-xs">
+                        {prompt.name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
-              <Textarea
-                placeholder="Add session-specific context such as meeting goals, resume details, requirements, notes, or evidence..."
-                value={contextContent}
-                onChange={(e) => setContextContent(e.target.value)}
-                className="min-h-28 resize-y text-xs"
-              />
-              <p className="text-[10px] text-muted-foreground">
-                This is layered with the saved system prompt when enabled and persists locally.
-              </p>
-            </div>
+            )}
+
+            {/* Session documents: resume, JD and other evidence */}
+            <SessionDocuments />
           </div>
 
           {/* Advanced Settings Toggle */}

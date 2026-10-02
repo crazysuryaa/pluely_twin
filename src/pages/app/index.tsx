@@ -123,7 +123,7 @@ const App = () => {
               event.preventDefault();
               void getCurrentWindow().startResizeDragging("SouthEast").catch(console.error);
             }}>◢</button>}
-            {customizable.cursor.type === "invisible" && getPlatform() !== "linux" && <CustomCursor />}
+            {customizable.cursor.type === "invisible" && getPlatform() !== "linux" && !isHidden && <CustomCursor />}
           </div>
         )}
       </SessionCompletion>

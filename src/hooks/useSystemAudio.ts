@@ -2,7 +2,7 @@ import { isTypingTarget } from "./keyboardTarget";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useWindowResize, useGlobalShortcuts } from ".";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useApp } from "@/contexts";
 import { fetchSTT, fetchAIResponse } from "@/lib/functions";
 import {
@@ -12,6 +12,7 @@ import {
   STORAGE_KEYS,
 } from "@/config";
 import {
+  buildSessionDocumentsPrompt,
   safeLocalStorage,
   shouldUsePluelyAPI,
   generateConversationTitle,
@@ -49,6 +50,25 @@ const DEFAULT_VAD_CONFIG: VadConfig = {
 };
 
 const TRANSCRIPT_SETTLE_MS = 650;
+
+// listen() resolves asynchronously. If the effect is torn down before it
+// resolves (StrictMode remount, deps change), the listener must still be
+// removed or it leaks and every event is handled twice.
+const createListenerScope = () => {
+  let disposed = false;
+  const unlisteners: UnlistenFn[] = [];
+  return {
+    track: (pending: Promise<UnlistenFn>) =>
+      pending.then((unlisten) => {
+        if (disposed) unlisten();
+        else unlisteners.push(unlisten);
+      }),
+    dispose: () => {
+      disposed = true;
+      unlisteners.splice(0).forEach((unlisten) => unlisten());
+    },
+  };
+};
 
 // Chat message interface (reusing from useCompletion)
 interface ChatMessage {
@@ -137,51 +157,47 @@ export function useSystemAudio() {
     const parts: string[] = [];
 
     if (useSystemPrompt) {
-      parts.push(systemPrompt || DEFAULT_SYSTEM_PROMPT);
-    }
-
-    const sessionContext = contextContent.trim();
-    if (sessionContext) {
+      // The prompt is chosen in the dashboard window; read storage directly so
+      // a missed cross-window storage event can't leave this session stale.
       parts.push(
-        `SESSION CONTEXT / EVIDENCE:
-${sessionContext}
-
-Use this context when relevant. Do not invent facts that are not supported by the conversation or supplied context.`
+        safeLocalStorage.getItem(STORAGE_KEYS.SYSTEM_PROMPT) ||
+          systemPrompt ||
+          DEFAULT_SYSTEM_PROMPT
       );
     }
 
+    // Resume / JD / evidence uploaded in session settings (read fresh).
+    const documents = buildSessionDocumentsPrompt();
+    if (documents) {
+      parts.push(documents);
+    }
+
     return parts.length > 0 ? parts.join("\n\n") : DEFAULT_SYSTEM_PROMPT;
-  }, [useSystemPrompt, systemPrompt, contextContent]);
+  }, [useSystemPrompt, systemPrompt]);
 
   useEffect(() => {
-    let remoteCommentUnlisten: (() => void) | undefined;
+    const scope = createListenerScope();
 
-    const setupRemoteCommentListener = async () => {
-      try {
-        remoteCommentUnlisten = await listen<RemoteComment>(
-          "remote-comment",
-          (event) => {
-            const commentWithTimestamp: RemoteComment = {
-              ...event.payload,
-              timestamp: event.payload.timestamp || Date.now(),
-            };
-            setRemoteComments((current) => [
-              ...current.slice(-49),
-              commentWithTimestamp,
-            ]);
-            setIsPopoverOpen(true);
-          }
-        );
-      } catch (err) {
-        console.error("Failed to setup remote commenter listener:", err);
-      }
-    };
+    scope
+      .track(
+        listen<RemoteComment>("remote-comment", (event) => {
+          const commentWithTimestamp: RemoteComment = {
+            ...event.payload,
+            timestamp: event.payload.timestamp || Date.now(),
+          };
+          setRemoteComments((current) =>
+            current.some((c) => c.id === commentWithTimestamp.id)
+              ? current
+              : [...current.slice(-49), commentWithTimestamp]
+          );
+          setIsPopoverOpen(true);
+        })
+      )
+      .catch((err) =>
+        console.error("Failed to setup remote commenter listener:", err)
+      );
 
-    setupRemoteCommentListener();
-
-    return () => {
-      if (remoteCommentUnlisten) remoteCommentUnlisten();
-    };
+    return scope.dispose;
   }, []);
 
   // Load context settings and VAD config from localStorage on mount
@@ -231,49 +247,45 @@ Use this context when relevant. Do not invent facts that are not supported by th
 
   // Handle continuous recording progress events AND error events
   useEffect(() => {
-    let progressUnlisten: (() => void) | undefined;
-    let startUnlisten: (() => void) | undefined;
-    let stopUnlisten: (() => void) | undefined;
-    let errorUnlisten: (() => void) | undefined;
-    let discardedUnlisten: (() => void) | undefined;
+    const scope = createListenerScope();
 
     const setupContinuousListeners = async () => {
       try {
         // Progress updates (every second)
-        progressUnlisten = await listen("recording-progress", (event) => {
+        await scope.track(listen("recording-progress", (event) => {
           const seconds = event.payload as number;
           setRecordingProgress(seconds);
-        });
+        }));
 
         // Recording started
-        startUnlisten = await listen("continuous-recording-start", () => {
+        await scope.track(listen("continuous-recording-start", () => {
           setRecordingProgress(0);
           setIsRecordingInContinuousMode(true);
-        });
+        }));
 
         // Recording stopped
-        stopUnlisten = await listen("continuous-recording-stopped", () => {
+        await scope.track(listen("continuous-recording-stopped", () => {
           setRecordingProgress(0);
           setIsRecordingInContinuousMode(false);
-        });
+        }));
 
         // Audio encoding errors
-        errorUnlisten = await listen("audio-encoding-error", (event) => {
+        await scope.track(listen("audio-encoding-error", (event) => {
           const errorMsg = event.payload as string;
           console.error("Audio encoding error:", errorMsg);
           setError(`Failed to process audio: ${errorMsg}`);
           setIsProcessing(false);
           setIsAIProcessing(false);
           setIsRecordingInContinuousMode(false);
-        });
+        }));
 
         // Speech discarded (too short)
-        discardedUnlisten = await listen("speech-discarded", (event) => {
+        await scope.track(listen("speech-discarded", (event) => {
           const reason = event.payload as string;
           console.log("Speech discarded:", reason);
           setIsHearingSpeech(false);
           // Don't show error - this is expected behavior
-        });
+        }));
       } catch (err) {
         console.error("Failed to setup continuous recording listeners:", err);
       }
@@ -281,29 +293,22 @@ Use this context when relevant. Do not invent facts that are not supported by th
 
     setupContinuousListeners();
 
-    return () => {
-      if (progressUnlisten) progressUnlisten();
-      if (startUnlisten) startUnlisten();
-      if (stopUnlisten) stopUnlisten();
-      if (errorUnlisten) errorUnlisten();
-      if (discardedUnlisten) discardedUnlisten();
-    };
+    return scope.dispose;
   }, []);
 
   // Handle single speech detection event (both VAD and continuous modes)
   useEffect(() => {
-    let speechUnlisten: (() => void) | undefined;
-    let speechStartUnlisten: (() => void) | undefined;
+    const scope = createListenerScope();
 
     const setupEventListener = async () => {
       try {
-        speechStartUnlisten = await listen("speech-start", () => {
+        await scope.track(listen("speech-start", () => {
           if (capturing) {
             setIsHearingSpeech(true);
           }
-        });
+        }));
 
-        speechUnlisten = await listen("speech-detected", async (event) => {
+        await scope.track(listen("speech-detected", async (event) => {
           try {
             setIsHearingSpeech(false);
             if (!capturing) return;
@@ -444,7 +449,7 @@ Use this context when relevant. Do not invent facts that are not supported by th
             setIsProcessing(false);
             setIsHearingSpeech(false);
           }
-        });
+        }));
       } catch (err) {
         setError("Failed to setup speech listener");
       }
@@ -452,10 +457,7 @@ Use this context when relevant. Do not invent facts that are not supported by th
 
     setupEventListener();
 
-    return () => {
-      if (speechUnlisten) speechUnlisten();
-      if (speechStartUnlisten) speechStartUnlisten();
-    };
+    return scope.dispose;
   }, [
     capturing,
     selectedSttProvider,
@@ -734,6 +736,37 @@ Use this context when relevant. Do not invent facts that are not supported by th
   );
 
   processWithAIRef.current = processWithAI;
+
+  // Remove a transcribed speech entry; the debounced save rewrites the stored
+  // messages, so the deletion persists.
+  const deleteMessage = useCallback(
+    (id: string) => {
+      const removed = conversation.messages.find((m) => m.id === id);
+      if (!removed) return;
+      setConversation((prev) => ({
+        ...prev,
+        messages: prev.messages.filter((m) => m.id !== id),
+        updatedAt: Date.now(),
+      }));
+      // Otherwise the pane would show the same text again as "pending".
+      setLastTranscription((current) =>
+        current === removed.content ? "" : current
+      );
+    },
+    [conversation.messages]
+  );
+
+  // Drop speech that was transcribed but not yet submitted.
+  const discardPendingSpeech = useCallback(() => {
+    if (pendingTranscriptTimerRef.current) {
+      clearTimeout(pendingTranscriptTimerRef.current);
+      pendingTranscriptTimerRef.current = null;
+    }
+    pendingTranscriptRef.current = "";
+    pendingManualQuestionRef.current = "";
+    setPendingManualQuestion("");
+    setLastTranscription("");
+  }, []);
 
   const submitPendingQuestion = useCallback(async () => {
     const question = pendingManualQuestionRef.current.trim();
@@ -1164,6 +1197,8 @@ Use this context when relevant. Do not invent facts that are not supported by th
     lastAIResponse,
     pendingManualQuestion,
     submitPendingQuestion,
+    deleteMessage,
+    discardPendingSpeech,
     attachedScreenshots,
     addScreenshot,
     removeScreenshot,

@@ -64,4 +64,35 @@ describe("ListeningPane", () => {
 
     expect(screen.getByText("Waiting for speech or a commenter message")).toBeTruthy();
   });
+
+  it("deletes transcribed speech without selecting it, and only for speech entries", () => {
+    const onSelect = vi.fn(), onDelete = vi.fn(), onDiscard = vi.fn();
+    render(
+      <ListeningPane
+        conversation={{
+          id: "conv-2",
+          title: "Session",
+          createdAt: 1000,
+          updatedAt: 2000,
+          messages: [
+            { id: "u-1", role: "user", content: "What is your notice period?", timestamp: 1000 },
+            { id: "a-1", role: "assistant", content: "Two weeks", timestamp: 1001 },
+          ],
+        }}
+        pendingManualQuestion="And your salary expectations?"
+        onSelectMessage={onSelect}
+        onDeleteEntry={onDelete}
+        onDiscardPending={onDiscard}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete transcribed speech" }));
+    expect(onDelete).toHaveBeenCalledWith("u-1");
+    expect(onSelect).not.toHaveBeenCalled();
+    // AI answers have no delete button; only the one speech entry does.
+    expect(screen.getAllByRole("button", { name: "Delete transcribed speech" })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete pending speech" }));
+    expect(onDiscard).toHaveBeenCalledOnce();
+  });
 });

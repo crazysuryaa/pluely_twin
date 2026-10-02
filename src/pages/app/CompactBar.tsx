@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import {
   PlayIcon,
   SquareIcon,
-  SettingsIcon,
   SlidersHorizontalIcon,
   Maximize2Icon,
   Minimize2Icon,
@@ -86,16 +85,8 @@ export const CompactBar = ({
     </div>
     <span className="h-5 w-px shrink-0 bg-white/15" />
 
-    {/* Profile button (to open main dashboard) */}
-    <button
-      onClick={onOpenDashboard || onGlobalSettings || onSettings}
-      aria-label="Profile (open dashboard)"
-      title="Open main dashboard"
-      className="flex min-w-0 flex-1 items-center gap-1.5 truncate rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-left text-xs transition-colors hover:bg-white/10 hover:border-white/25"
-    >
-      <UserIcon className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-      <span className="truncate">{profile}</span>
-    </button>
+    {/* Empty space stays draggable and pushes actions to the right */}
+    <div data-tauri-drag-region="true" className="h-full min-w-0 flex-1" />
 
     {/* Start / Stop button */}
     <button
@@ -133,14 +124,14 @@ export const CompactBar = ({
       <SlidersHorizontalIcon className="h-4 w-4" />
     </button>
 
-    {/* Global / Profile settings button */}
+    {/* Profile & global settings (opens dashboard) */}
     <button
-      aria-label="Global settings"
-      title="Global settings & profiles"
+      aria-label="Profile and settings"
+      title={`${profile} · settings`}
       onClick={onGlobalSettings || onOpenDashboard || onSettings}
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full hover:bg-white/10 text-zinc-300 transition-colors"
+      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full hover:bg-white/10 text-indigo-400 transition-colors"
     >
-      <SettingsIcon className="h-4 w-4" />
+      <UserIcon className="h-4 w-4" />
     </button>
 
     {/* Expand / Collapse session */}

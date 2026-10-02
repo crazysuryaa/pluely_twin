@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import Overlay from "./components/Overlay";
+import { CursorGhost } from "./components/CursorGhost";
 import { AppProvider, ThemeProvider } from "./contexts";
 import "./global.css";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -17,6 +18,10 @@ if (windowLabel.startsWith("capture-overlay-")) {
     <React.StrictMode>
       <Overlay monitorIndex={monitorIndex} />
     </React.StrictMode>
+  );
+} else if (windowLabel === "cursor-ghost") {
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <CursorGhost />
   );
 } else {
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

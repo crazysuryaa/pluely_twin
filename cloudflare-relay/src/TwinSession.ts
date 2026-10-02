@@ -32,7 +32,16 @@ type PendingCommentRow = {
   source_connection_id: string;
 };
 
+// Per-viewer media flow control: a viewer gets a new frame only while it has
+// fewer than MAX_FRAMES_IN_FLIGHT unacknowledged frames. Slow viewers skip
+// frames instead of piling them up in this object's memory.
+const MAX_FRAMES_IN_FLIGHT = 2;
+const FRAME_ACK_TIMEOUT_MS = 5_000;
+
 export class TwinSession extends DurableObject<Env> {
+  // In-memory only; resets harmlessly if the object hibernates.
+  private framesInFlight = new Map<string, { count: number; lastAckAt: number }>();
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
 
@@ -183,9 +192,26 @@ export class TwinSession extends DurableObject<Env> {
         return;
       }
 
+      const now = Date.now();
       for (const viewer of this.getSocketsByRole("commenter", "media")) {
+        const viewerId = (viewer.deserializeAttachment() as SocketAttachment)
+          .connectionId;
+        const flow = this.framesInFlight.get(viewerId) ?? {
+          count: 0,
+          lastAckAt: now,
+        };
+
+        if (flow.count >= MAX_FRAMES_IN_FLIGHT) {
+          if (now - flow.lastAckAt < FRAME_ACK_TIMEOUT_MS) continue;
+          // Acks went missing; start over rather than starving the viewer.
+          flow.count = 0;
+          flow.lastAckAt = now;
+        }
+
         try {
           viewer.send(message);
+          flow.count += 1;
+          this.framesInFlight.set(viewerId, flow);
         } catch {
           // Viewer reconnect logic handles dead media sockets.
         }
@@ -200,6 +226,17 @@ export class TwinSession extends DurableObject<Env> {
       return;
     }
     if (message === "pong") return;
+
+    if (message === "frame_ack") {
+      const attachment =
+        ws.deserializeAttachment() as SocketAttachment | null;
+      const flow = attachment && this.framesInFlight.get(attachment.connectionId);
+      if (flow) {
+        flow.count = Math.max(0, flow.count - 1);
+        flow.lastAckAt = Date.now();
+      }
+      return;
+    }
 
     let value: Record<string, unknown>;
     try {
@@ -257,6 +294,7 @@ export class TwinSession extends DurableObject<Env> {
 
     if (attachment?.authenticated) {
       if (attachment.channel === "media") {
+        this.framesInFlight.delete(attachment.connectionId);
         if (attachment.role === "host") {
           this.broadcastToRole(
             "commenter",
@@ -606,10 +644,12 @@ export class TwinSession extends DurableObject<Env> {
       typeof value.comment_id === "string"
         ? value.comment_id.trim().slice(0, 128)
         : "";
-    const text =
+    // Keep indentation (code); only drop surrounding blank lines.
+    const rawText =
       typeof value.text === "string"
-        ? value.text.trim()
+        ? value.text.replace(/^\s*\n/, "").trimEnd()
         : "";
+    const text = rawText.trim() ? rawText : "";
 
     if (!commentId) {
       this.sendJson(ws, { type: "error", message: "Invalid comment id" });

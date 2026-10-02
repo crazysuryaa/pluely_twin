@@ -5,6 +5,7 @@ import {
   AutostartToggle,
 } from "./components";
 import { PageLayout } from "@/layouts";
+import { getPlatform } from "@/lib";
 
 const Settings = () => {
   return (
@@ -15,8 +16,8 @@ const Settings = () => {
       {/* Autostart Toggle */}
       <AutostartToggle />
 
-      {/* App Icon Toggle */}
-      <AppIconToggle />
+      {/* App Icon Toggle (macOS never shows a Dock icon) */}
+      {getPlatform() !== "macos" && <AppIconToggle />}
 
       {/* Always On Top Toggle */}
       <AlwaysOnTopToggle />

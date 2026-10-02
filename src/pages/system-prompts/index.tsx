@@ -112,7 +112,7 @@ const SystemPrompts = () => {
           prompt: form.prompt,
         });
         // Auto-select the newly created prompt
-        handleSelectPrompt(newPrompt.id);
+        handleSelectPrompt(newPrompt);
       }
 
       setForm({ name: "", prompt: "" });

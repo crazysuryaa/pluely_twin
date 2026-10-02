@@ -2,7 +2,7 @@ import { isTypingTarget } from "./keyboardTarget";
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useWindowResize } from "./useWindow";
 import { useGlobalShortcuts } from "@/hooks";
-import { MAX_FILES } from "@/config";
+import { MAX_FILES, STORAGE_KEYS } from "@/config";
 import { useApp } from "@/contexts";
 import {
   fetchAIResponse,
@@ -15,6 +15,8 @@ import {
   generateMessageId,
   generateRequestId,
   getResponseSettings,
+  safeLocalStorage,
+  buildSessionDocumentsPrompt,
 } from "@/lib";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -214,7 +216,14 @@ export const useCompletion = ({ manageWindow = true }: { manageWindow?: boolean 
           for await (const chunk of fetchAIResponse({
             provider: usePluelyAPI ? undefined : provider,
             selectedProvider: selectedAIProvider,
-            systemPrompt: systemPrompt || undefined,
+            systemPrompt:
+              [
+                safeLocalStorage.getItem(STORAGE_KEYS.SYSTEM_PROMPT) ||
+                  systemPrompt,
+                buildSessionDocumentsPrompt(),
+              ]
+                .filter(Boolean)
+                .join("\n\n") || undefined,
             history: messageHistory,
             userMessage: input,
             imagesBase64,
@@ -617,7 +626,14 @@ export const useCompletion = ({ manageWindow = true }: { manageWindow?: boolean 
             for await (const chunk of fetchAIResponse({
               provider: usePluelyAPI ? undefined : provider,
               selectedProvider: selectedAIProvider,
-              systemPrompt: systemPrompt || undefined,
+              systemPrompt:
+              [
+                safeLocalStorage.getItem(STORAGE_KEYS.SYSTEM_PROMPT) ||
+                  systemPrompt,
+                buildSessionDocumentsPrompt(),
+              ]
+                .filter(Boolean)
+                .join("\n\n") || undefined,
               history: messageHistory,
               userMessage: prompt,
               imagesBase64: [base64],

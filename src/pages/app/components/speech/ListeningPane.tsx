@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { HeadphonesIcon, MessageSquareIcon, SparklesIcon, Loader2, AlertCircleIcon, PanelLeftClose } from "lucide-react";
+import { HeadphonesIcon, MessageSquareIcon, SparklesIcon, Loader2, AlertCircleIcon, PanelLeftClose, Trash2Icon } from "lucide-react";
 import type { ChatConversation } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -24,7 +24,25 @@ export interface ListeningPaneProps {
   selectedMessageId?: string | null;
   onSelectMessage?: (id: string | null) => void;
   onMinimize?: () => void;
+  onDeleteEntry?: (id: string) => void;
+  onDiscardPending?: () => void;
 }
+
+const DeleteButton = ({ label, onDelete }: { label: string; onDelete: () => void }) => (
+  <button
+    type="button"
+    aria-label={label}
+    title="Delete"
+    onClick={(e) => {
+      e.stopPropagation(); // don't open the entry
+      onDelete();
+    }}
+    onKeyDown={(e) => e.stopPropagation()}
+    className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-red-500/15 hover:text-red-400"
+  >
+    <Trash2Icon className="h-3 w-3" />
+  </button>
+);
 
 interface UnifiedHistoryEntry {
   id: string;
@@ -47,6 +65,8 @@ export const ListeningPane = ({
   selectedMessageId = null,
   onSelectMessage,
   onMinimize,
+  onDeleteEntry,
+  onDiscardPending,
 }: ListeningPaneProps) => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -219,9 +239,20 @@ export const ListeningPane = ({
                     </>
                   )}
                 </div>
-                <time className="text-[10px] text-zinc-400 shrink-0 tabular-nums">
-                  {formatTime(entry.timestamp)}
-                </time>
+                <div className="flex items-center gap-1">
+                  <time className="text-[10px] text-zinc-400 shrink-0 tabular-nums">
+                    {formatTime(entry.timestamp)}
+                  </time>
+                  {entry.role === "user" && onDeleteEntry && (
+                    <DeleteButton
+                      label="Delete transcribed speech"
+                      onDelete={() => {
+                        if (isSelected) onSelectMessage?.(null);
+                        onDeleteEntry(entry.id);
+                      }}
+                    />
+                  )}
+                </div>
               </div>
               <p className="truncate text-xs leading-relaxed text-[#d0d6e0] group-hover:text-white">
                 {entry.content}
@@ -250,7 +281,18 @@ export const ListeningPane = ({
                   Pending
                 </span>
               </div>
-              <span className="text-[10px] text-emerald-400/70">Ready to submit</span>
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] text-emerald-400/70">Ready to submit</span>
+                {onDiscardPending && (
+                  <DeleteButton
+                    label="Delete pending speech"
+                    onDelete={() => {
+                      if (selectedMessageId === "pending") onSelectMessage?.(null);
+                      onDiscardPending();
+                    }}
+                  />
+                )}
+              </div>
             </div>
             <p className="truncate text-xs leading-relaxed text-[#e2e4e7] group-hover:text-white">
               {pendingContent}

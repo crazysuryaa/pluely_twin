@@ -148,12 +148,7 @@ async fn handle_connection(
     )
     .await?;
 
-    let mut last_sent_seq = replay_history(
-        &mut sink,
-        &history,
-        requested_last_seq,
-    )
-    .await?;
+    let mut last_sent_seq = replay_history(&mut sink, &history, requested_last_seq).await?;
 
     let _ = app.emit(
         "remote-commenter-connected",
@@ -189,7 +184,7 @@ async fn handle_connection(
 
                         match command {
                             CommenterCommand::CommentSend { comment_id, text } => {
-                                let text = text.trim().to_string();
+                                let text = trim_blank_edges(&text).to_string();
                                 let comment_id = comment_id.trim().to_string();
 
                                 if comment_id.is_empty() || comment_id.len() > 128 {
@@ -354,10 +349,7 @@ where
     Ok(last_seq)
 }
 
-async fn send_host_event<S>(
-    sink: &mut S,
-    sequenced: &SequencedHostEvent,
-) -> Result<(), String>
+async fn send_host_event<S>(sink: &mut S, sequenced: &SequencedHostEvent) -> Result<(), String>
 where
     S: futures_util::Sink<Message> + Unpin,
     S::Error: std::fmt::Display,
@@ -377,10 +369,35 @@ where
     S: futures_util::Sink<Message> + Unpin,
     S::Error: std::fmt::Display,
 {
-    let json =
-        serde_json::to_string(message).map_err(|e| format!("Encode error: {e}"))?;
+    let json = serde_json::to_string(message).map_err(|e| format!("Encode error: {e}"))?;
 
     sink.send(Message::Text(json.into()))
         .await
         .map_err(|e| format!("WebSocket send failed: {e}"))
+}
+
+/// Drops surrounding blank lines and trailing whitespace but keeps the first
+/// line's indentation, so pasted code keeps its spacing.
+fn trim_blank_edges(text: &str) -> &str {
+    let lead = text.len() - text.trim_start().len();
+    let start = text[..lead].rfind('\n').map_or(0, |i| i + 1);
+    text[start..].trim_end()
+}
+
+#[cfg(test)]
+mod trim_blank_edges_tests {
+    use super::trim_blank_edges;
+
+    #[test]
+    fn keeps_first_line_indentation() {
+        assert_eq!(
+            trim_blank_edges("\n\n    if x:\n        y()\n\n"),
+            "    if x:\n        y()"
+        );
+    }
+
+    #[test]
+    fn whitespace_only_is_empty() {
+        assert_eq!(trim_blank_edges(" \n\t \n "), "");
+    }
 }

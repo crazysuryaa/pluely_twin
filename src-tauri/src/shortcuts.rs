@@ -276,10 +276,7 @@ fn handle_screenshot_shortcut<R: Runtime>(app: &AppHandle<R>) {
 
 fn handle_scroll_chat<R: Runtime>(app: &AppHandle<R>, direction: &str) {
     if let Some(window) = app.get_webview_window("main") {
-        if let Err(e) = window.emit(
-            "scroll-chat",
-            json!({ "direction": direction }),
-        ) {
+        if let Err(e) = window.emit("scroll-chat", json!({ "direction": direction })) {
             eprintln!("Failed to emit scroll-chat event: {}", e);
         }
     }
@@ -511,12 +508,10 @@ pub fn set_license_status<R: Runtime>(app: AppHandle<R>, has_license: bool) -> R
 pub fn set_app_icon_visibility<R: Runtime>(app: AppHandle<R>, visible: bool) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
-        // On macOS, use activation policy to control dock icon
-        let policy = if visible {
-            tauri::ActivationPolicy::Regular
-        } else {
-            tauri::ActivationPolicy::Accessory
-        };
+        // The Dock icon must never appear on macOS: always stay an accessory
+        // app, whatever the stored preference or caller asks for.
+        let _ = visible;
+        let policy = tauri::ActivationPolicy::Accessory;
 
         app.set_activation_policy(policy).map_err(|e| {
             eprintln!("Failed to set activation policy: {}", e);

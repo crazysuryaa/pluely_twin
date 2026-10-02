@@ -139,6 +139,17 @@ export const useSystemPrompts = () => {
       const selectedPrompt = prompts.find((p) => p.id === selectedPromptId);
       if (selectedPrompt) {
         setSystemPrompt(selectedPrompt.prompt);
+        // The overlay window only sees changes through localStorage, so edits
+        // to the selected prompt must be written back or it keeps the old text.
+        if (
+          safeLocalStorage.getItem(STORAGE_KEYS.SYSTEM_PROMPT) !==
+          selectedPrompt.prompt
+        ) {
+          safeLocalStorage.setItem(
+            STORAGE_KEYS.SYSTEM_PROMPT,
+            selectedPrompt.prompt
+          );
+        }
       } else {
         // Selected prompt was deleted, reset to default
         setSelectedPromptId(null);
@@ -161,9 +172,15 @@ export const useSystemPrompts = () => {
    * Handle selecting a prompt
    */
   const handleSelectPrompt = useCallback(
-    (promptId: number) => {
-      const selectedPrompt = prompts.find((p) => p.id === promptId);
+    (promptOrId: number | SystemPrompt) => {
+      // A just-created prompt isn't in `prompts` yet (stale closure), so
+      // callers may pass the prompt itself instead of its id.
+      const selectedPrompt =
+        typeof promptOrId === "number"
+          ? prompts.find((p) => p.id === promptOrId)
+          : promptOrId;
       if (selectedPrompt) {
+        const promptId = selectedPrompt.id;
         setSystemPrompt(selectedPrompt.prompt);
         setSelectedPromptId(promptId);
         safeLocalStorage.setItem(
@@ -180,6 +197,27 @@ export const useSystemPrompts = () => {
     },
     [prompts, setSystemPrompt]
   );
+
+  // Follow selections made in another window (dashboard vs. session).
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== STORAGE_KEYS.SELECTED_SYSTEM_PROMPT_ID) return;
+      setSelectedPromptId(e.newValue ? Number(e.newValue) : null);
+      void fetchPrompts(); // the selection may be a prompt created over there
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [fetchPrompts]);
+
+  /**
+   * Nothing selected yet (and no Pluely prompt chosen): use the newest saved
+   * prompt rather than silently falling back to the built-in default.
+   */
+  useEffect(() => {
+    if (selectedPromptId || prompts.length === 0) return;
+    if (safeLocalStorage.getItem("selected_pluely_prompt")) return;
+    handleSelectPrompt(prompts[0]); // getAllSystemPrompts orders newest first
+  }, [prompts, selectedPromptId, handleSelectPrompt]);
 
   return {
     prompts,

@@ -24,8 +24,9 @@ describe("session-first header", () => {
   it("triggers dashboard and requires confirmation before quit action", () => {
     const onOpenDashboard = vi.fn(), onQuit = vi.fn();
     render(<CompactBar active={false} expanded={false} elapsed="00:00" profile="My Profile" onStart={vi.fn()} onStop={vi.fn()} onToggleExpanded={vi.fn()} onSettings={vi.fn()} onOpenDashboard={onOpenDashboard} onQuit={onQuit} />);
-    fireEvent.click(screen.getByRole("button", {name: "Profile (open dashboard)"}));
+    fireEvent.click(screen.getByRole("button", {name: "Profile and settings"}));
     expect(onOpenDashboard).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", {name: "Global settings"})).toBeNull();
 
     fireEvent.click(screen.getByRole("button", {name: "Quit app"}));
     expect(onQuit).not.toHaveBeenCalled();
@@ -68,7 +69,7 @@ describe("session-first header", () => {
 
     // Both settings buttons must be rendered
     const sessionSettingsBtn = screen.getByRole("button", { name: "Session settings" });
-    const globalSettingsBtn = screen.getByRole("button", { name: "Global settings" });
+    const globalSettingsBtn = screen.getByRole("button", { name: "Profile and settings" });
     expect(sessionSettingsBtn).toBeTruthy();
     expect(globalSettingsBtn).toBeTruthy();
 
