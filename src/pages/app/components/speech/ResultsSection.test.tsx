@@ -23,6 +23,6 @@ describe("ResultsSection workspace mode", () => {
 
     expect(screen.getByText("AI answer")).toBeTruthy();
     expect(screen.queryByText("System transcript")).toBeNull();
-    expect(screen.queryByText("Remote note")).toBeNull();
+    expect(screen.getByText("Remote note")).toBeTruthy();
   });
 });

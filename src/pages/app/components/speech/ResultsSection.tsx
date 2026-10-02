@@ -1,6 +1,6 @@
 import { ChatConversation } from "@/types";
 import { Markdown, Switch, CopyButton } from "@/components";
-import { BotIcon, HeadphonesIcon, Loader2, SparklesIcon } from "lucide-react";
+import { BotIcon, HeadphonesIcon, Loader2, MessageSquareIcon, SparklesIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -30,12 +30,14 @@ export const ResultsSection = ({
   setConversationMode,
   showInputs = true,
 }: Props) => {
-  const hasResponse = lastAIResponse || isAIProcessing;
+  const hasResponse = Boolean(lastAIResponse || isAIProcessing);
+  const hasTwinResponse = remoteComments.length > 0;
   const hasHistory = conversation.messages.length > 2;
 
   if (
     !hasResponse &&
-    (!showInputs || (!lastTranscription && remoteComments.length === 0))
+    !hasTwinResponse &&
+    (!showInputs || !lastTranscription)
   ) {
     return null;
   }
@@ -66,34 +68,15 @@ export const ResultsSection = ({
         </div>
       </div>
 
-      {/* RESPONSE MODE: System as text, then AI response */}
+      {/* RESPONSE MODE: System as text, then AI response, then Twin responses */}
       {!conversationMode && (
-        <div className="space-y-2">
+        <div className="space-y-3">
           {/* System Input - Just text with bold label */}
           {showInputs && lastTranscription && (
             <div className="flex items-start justify-between gap-2">
               <p className="text-[11px] text-muted-foreground flex-1">
                 <span className="font-semibold">System:</span> {lastTranscription}
               </p>
-            </div>
-          )}
-
-          {showInputs && remoteComments.length > 0 && (
-            <div className="space-y-1.5">
-              {remoteComments.slice(-5).map((comment) => (
-                <div
-                  key={comment.id}
-                  className="rounded-md border-l-2 border-amber-500/60 bg-amber-500/5 p-2"
-                >
-                  <div className="text-[9px] font-medium text-amber-600 uppercase tracking-wide">
-                    Commenter
-                    {comment.device_name ? ` · ${comment.device_name}` : ""}
-                  </div>
-                  <p className="text-sm mt-0.5 whitespace-pre-wrap">
-                    {comment.text}
-                  </p>
-                </div>
-              ))}
             </div>
           )}
 
@@ -117,10 +100,35 @@ export const ResultsSection = ({
               )}
             </div>
           )}
+
+          {/* Twin Responses - Below AI response */}
+          {remoteComments.length > 0 && (
+            <div className={`space-y-2.5 ${hasResponse ? "pt-3 border-t border-border/50" : ""}`}>
+              {remoteComments.map((comment) => (
+                <div
+                  key={comment.id}
+                  className="rounded-lg border border-amber-500/30 bg-amber-500/[0.04] p-3 space-y-2"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <MessageSquareIcon className="h-3.5 w-3.5 text-amber-400" />
+                      <span className="text-[10px] font-semibold text-amber-300 uppercase tracking-wide">
+                        {comment.device_name || "Twin Response"}
+                      </span>
+                    </div>
+                    <CopyButton content={comment.text} />
+                  </div>
+                  <div className="prose prose-sm max-w-none dark:prose-invert text-sm leading-relaxed text-[#e2e4e7]">
+                    <Markdown>{comment.text}</Markdown>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
-      {/* CONVERSATION MODE: AI on top, then System, then history */}
+      {/* CONVERSATION MODE: AI on top, then System, then Twin responses, then history */}
       {conversationMode && (
         <div className="space-y-2">
           {/* AI Response - First (on top) */}
@@ -165,20 +173,26 @@ export const ResultsSection = ({
             </div>
           )}
 
-          {showInputs && remoteComments.length > 0 && (
-            <div className="space-y-1.5">
-              {remoteComments.slice(-5).map((comment) => (
+          {/* Twin Responses - Below */}
+          {remoteComments.length > 0 && (
+            <div className="space-y-2">
+              {remoteComments.map((comment) => (
                 <div
                   key={comment.id}
-                  className="rounded-md border-l-2 border-amber-500/60 bg-amber-500/5 p-2.5"
+                  className="rounded-md border border-amber-500/30 bg-amber-500/[0.04] p-2.5 space-y-1.5"
                 >
-                  <div className="text-[9px] font-medium text-amber-600 uppercase tracking-wide">
-                    Commenter
-                    {comment.device_name ? ` · ${comment.device_name}` : ""}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <MessageSquareIcon className="h-3 w-3 text-amber-400" />
+                      <span className="text-[9px] font-medium text-amber-300 uppercase tracking-wide">
+                        {comment.device_name || "Twin Response"}
+                      </span>
+                    </div>
+                    <CopyButton content={comment.text} />
                   </div>
-                  <p className="text-sm mt-1 whitespace-pre-wrap">
-                    {comment.text}
-                  </p>
+                  <div className="prose prose-sm max-w-none dark:prose-invert text-sm">
+                    <Markdown>{comment.text}</Markdown>
+                  </div>
                 </div>
               ))}
             </div>
