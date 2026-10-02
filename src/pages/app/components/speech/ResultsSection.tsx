@@ -46,7 +46,7 @@ export const ResultsSection = ({
   const modKey = isMac ? "⌘" : "Ctrl";
 
   return (
-    <div className="rounded-lg border border-border/50 bg-muted/20 p-3 space-y-3">
+    <div className="w-full min-w-0 rounded-lg border border-border/50 bg-muted/20 p-3 space-y-3">
       {/* Header with toggle */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
@@ -70,7 +70,7 @@ export const ResultsSection = ({
 
       {/* RESPONSE MODE: System as text, then AI response, then Twin responses */}
       {!conversationMode && (
-        <div className="space-y-3">
+        <div className="w-full space-y-3">
           {/* System Input - Just text with bold label */}
           {showInputs && lastTranscription && (
             <div className="flex items-start justify-between gap-2">
@@ -82,7 +82,7 @@ export const ResultsSection = ({
 
           {/* AI Response */}
           {hasResponse && (
-            <div>
+            <div className="w-full">
               {isAIProcessing && !lastAIResponse ? (
                 <div className="flex items-center gap-2 py-2">
                   <Loader2 className="h-4 w-4 animate-spin text-primary" />
@@ -91,7 +91,7 @@ export const ResultsSection = ({
                   </span>
                 </div>
               ) : (
-                <div className="prose prose-sm max-w-none dark:prose-invert">
+                <div className="prose prose-sm max-w-none w-full dark:prose-invert">
                   <Markdown>{lastAIResponse}</Markdown>
                   {isAIProcessing && (
                     <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-1 align-middle" />
@@ -103,11 +103,11 @@ export const ResultsSection = ({
 
           {/* Twin Responses - Below AI response */}
           {remoteComments.length > 0 && (
-            <div className={`space-y-2.5 ${hasResponse ? "pt-3 border-t border-border/50" : ""}`}>
+            <div className={`w-full space-y-2.5 ${hasResponse ? "pt-3 border-t border-border/50" : ""}`}>
               {remoteComments.map((comment) => (
                 <div
                   key={comment.id}
-                  className="rounded-lg border border-amber-500/30 bg-amber-500/[0.04] p-3 space-y-2"
+                  className="w-full rounded-lg border border-amber-500/30 bg-amber-500/[0.04] p-3 space-y-2"
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
@@ -118,7 +118,7 @@ export const ResultsSection = ({
                     </div>
                     <CopyButton content={comment.text} />
                   </div>
-                  <div className="prose prose-sm max-w-none dark:prose-invert text-sm leading-relaxed text-[#e2e4e7]">
+                  <div className="prose prose-sm max-w-none w-full dark:prose-invert text-sm leading-relaxed text-[#e2e4e7]">
                     <Markdown>{comment.text}</Markdown>
                   </div>
                 </div>
@@ -130,10 +130,10 @@ export const ResultsSection = ({
 
       {/* CONVERSATION MODE: AI on top, then System, then Twin responses, then history */}
       {conversationMode && (
-        <div className="space-y-2">
+        <div className="w-full space-y-2">
           {/* AI Response - First (on top) */}
           {hasResponse && (
-            <div className="rounded-md bg-background/50 p-2.5">
+            <div className="w-full rounded-md bg-background/50 p-2.5">
               <div className="flex items-center gap-1.5 mb-1">
                 <BotIcon className="h-3 w-3 text-muted-foreground" />
                 <span className="text-[9px] font-medium text-muted-foreground uppercase tracking-wide">
@@ -148,7 +148,7 @@ export const ResultsSection = ({
                   </span>
                 </div>
               ) : (
-                <div className="prose prose-sm max-w-none dark:prose-invert text-sm">
+                <div className="prose prose-sm max-w-none w-full dark:prose-invert text-sm">
                   <Markdown>{lastAIResponse}</Markdown>
                   {isAIProcessing && (
                     <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-1 align-middle" />
@@ -160,7 +160,7 @@ export const ResultsSection = ({
 
           {/* System Input - Second */}
           {showInputs && lastTranscription && (
-            <div className="rounded-md border-l-2 border-primary/50 bg-primary/5 p-2.5">
+            <div className="w-full rounded-md border-l-2 border-primary/50 bg-primary/5 p-2.5">
               <div className="flex items-center justify-between gap-2 mb-1">
                 <div className="flex items-center gap-1.5">
                   <HeadphonesIcon className="h-3 w-3 text-primary" />
@@ -175,11 +175,11 @@ export const ResultsSection = ({
 
           {/* Twin Responses - Below */}
           {remoteComments.length > 0 && (
-            <div className="space-y-2">
+            <div className="w-full space-y-2">
               {remoteComments.map((comment) => (
                 <div
                   key={comment.id}
-                  className="rounded-md border border-amber-500/30 bg-amber-500/[0.04] p-2.5 space-y-1.5"
+                  className="w-full rounded-md border border-amber-500/30 bg-amber-500/[0.04] p-2.5 space-y-1.5"
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
@@ -190,7 +190,7 @@ export const ResultsSection = ({
                     </div>
                     <CopyButton content={comment.text} />
                   </div>
-                  <div className="prose prose-sm max-w-none dark:prose-invert text-sm">
+                  <div className="prose prose-sm max-w-none w-full dark:prose-invert text-sm">
                     <Markdown>{comment.text}</Markdown>
                   </div>
                 </div>
@@ -200,7 +200,7 @@ export const ResultsSection = ({
 
           {/* Previous Messages */}
           {hasHistory && (
-            <div className="space-y-2 pt-2 border-t border-border/50">
+            <div className="w-full space-y-2 pt-2 border-t border-border/50">
               <p className="text-[9px] text-muted-foreground uppercase tracking-wide">
                 Previous
               </p>

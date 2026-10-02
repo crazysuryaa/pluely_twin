@@ -251,6 +251,15 @@ pub async fn run_host_relay(
                                                 .get("device_name")
                                                 .and_then(|item| item.as_str())
                                                 .map(ToString::to_string),
+                                            timestamp: value
+                                                .get("timestamp")
+                                                .and_then(|item| item.as_u64())
+                                                .unwrap_or_else(|| {
+                                                    std::time::SystemTime::now()
+                                                        .duration_since(std::time::UNIX_EPOCH)
+                                                        .map(|d| d.as_millis() as u64)
+                                                        .unwrap_or(0)
+                                                }),
                                         };
 
                                         let _ = app.emit("remote-comment", &comment);

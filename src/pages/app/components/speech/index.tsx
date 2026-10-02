@@ -10,12 +10,12 @@ import {
   AlertCircleIcon,
   XIcon,
   SparklesIcon,
-  Maximize2Icon,
-  Minimize2Icon,
   ArrowLeftIcon,
   HeadphonesIcon,
   MessageSquareIcon,
   SlidersHorizontalIcon,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { ModeSwitcher } from "./ModeSwitcher";
@@ -210,7 +210,7 @@ export const SystemAudio = (
       isFullScreen={isFullScreen}
       listening={
         <div className="flex h-full min-h-0 flex-col">
-          <div className="min-h-0 flex-1">
+          <div className="min-h-0 min-w-0 flex-1 w-full">
             <ListeningPane
               conversation={conversation}
               transcription={lastTranscription}
@@ -224,10 +224,11 @@ export const SystemAudio = (
               remoteComments={remoteComments}
               selectedMessageId={selectedMessageId}
               onSelectMessage={(id) => setSelectedMessageId(id)}
+              onMinimize={() => setIsFullScreen(true)}
             />
           </div>
           {!setupRequired ? (
-            <div className="flex-shrink-0 border-t border-white/8 p-3">
+            <div className="flex-shrink-0 w-full border-t border-white/8 p-3">
               <RecordingPanel
                 isVadMode={isVadMode}
                 isRecording={isRecordingInContinuousMode}
@@ -244,8 +245,8 @@ export const SystemAudio = (
         </div>
       }
       response={
-        <div className="flex h-full min-h-0 flex-col">
-          <div className="flex h-11 flex-shrink-0 items-center justify-between gap-1 border-b border-white/8 px-3">
+        <div className="flex h-full w-full min-h-0 min-w-0 flex-col">
+          <div className="flex h-11 w-full flex-shrink-0 items-center justify-between gap-1 border-b border-white/8 px-3">
             <div className="flex items-center gap-2">
               {selectedMessageId ? (
                 <Button
@@ -263,18 +264,19 @@ export const SystemAudio = (
             </div>
             <div className="flex items-center gap-1">
 
-              {/* Full screen toggle */}
+              {/* Chat preview toggle */}
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-7 w-7"
-                title={isFullScreen ? "Exit full screen" : "Open in full screen"}
+                className="h-7 w-7 text-[#a0a5ad] hover:text-white"
+                title={isFullScreen ? "Show chat preview" : "Minimize chat preview"}
+                aria-label={isFullScreen ? "Show chat preview" : "Minimize chat preview"}
                 onClick={() => setIsFullScreen((v) => !v)}
               >
                 {isFullScreen ? (
-                  <Minimize2Icon className="h-3.5 w-3.5" />
+                  <PanelLeftOpen className="h-3.5 w-3.5" />
                 ) : (
-                  <Maximize2Icon className="h-3.5 w-3.5" />
+                  <PanelLeftClose className="h-3.5 w-3.5" />
                 )}
               </Button>
               {/* Session settings toggle within viewer panel */}
@@ -300,8 +302,8 @@ export const SystemAudio = (
             </div>
           </div>
 
-          <ScrollArea className="min-h-0 flex-1" ref={scrollAreaRef}>
-            <div className="space-y-4 p-4">
+          <ScrollArea className="h-full w-full min-h-0 min-w-0 flex-1" ref={scrollAreaRef}>
+            <div className="w-full space-y-4 p-4">
               {/* Session settings view when open */}
               {settingsOpen && (
                 <div className="space-y-3 rounded-xl border border-indigo-500/20 bg-indigo-950/[0.15] p-4">
@@ -485,14 +487,14 @@ export const SystemAudio = (
                   ) : (
                     <>
                       {responseSource === "chat" ? (
-                        <div className="space-y-3">
+                        <div className="w-full space-y-3">
                           {typedResponse}
                           {remoteComments.length > 0 && (
-                            <div className="space-y-2.5 pt-3 border-t border-white/8">
+                            <div className="w-full space-y-2.5 pt-3 border-t border-white/8">
                               {remoteComments.map((comment) => (
                                 <div
                                   key={comment.id}
-                                  className="rounded-lg border border-amber-500/30 bg-amber-500/[0.04] p-3 space-y-2"
+                                  className="w-full rounded-lg border border-amber-500/30 bg-amber-500/[0.04] p-3 space-y-2"
                                 >
                                   <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-1.5">
@@ -503,7 +505,7 @@ export const SystemAudio = (
                                     </div>
                                     <CopyButton content={comment.text} />
                                   </div>
-                                  <div className="prose prose-sm max-w-none dark:prose-invert text-sm leading-relaxed text-[#e2e4e7]">
+                                  <div className="prose prose-sm max-w-none w-full dark:prose-invert text-sm leading-relaxed text-[#e2e4e7]">
                                     <Markdown>{comment.text}</Markdown>
                                   </div>
                                 </div>
@@ -525,7 +527,7 @@ export const SystemAudio = (
                           showInputs={false}
                         />
                       ) : (
-                        <div className="flex min-h-40 flex-col items-center justify-center px-4 py-6 text-center">
+                        <div className="flex min-h-40 w-full flex-col items-center justify-center px-4 py-6 text-center">
                           <SparklesIcon className="mb-3 h-5 w-5 text-[#8a8f98]" />
                           <h3 className="text-sm font-medium text-[#f7f8f8]">
                             Your next response will appear here
@@ -544,7 +546,7 @@ export const SystemAudio = (
         </div>
       }
       actions={
-        <div className="space-y-2">
+        <div className="w-full space-y-2">
           {composer}
           {/* Quick shortcuts commented out for now
           {!setupRequired && hasResponse ? (
