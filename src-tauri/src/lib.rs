@@ -86,7 +86,9 @@ pub fn run() {
             capture::capture_selected_area,
             capture::close_overlay_window,
             documents::extract_document_text,
-            cursor_ghost::set_cursor_ghost_enabled,
+            cursor_ghost::show_cursor_ghost,
+            cursor_ghost::release_cursor_ghost,
+            cursor_ghost::hide_cursor_ghost,
             shortcuts::check_shortcuts_registered,
             shortcuts::get_registered_shortcuts,
             shortcuts::update_shortcuts,
@@ -140,9 +142,8 @@ pub fn run() {
             }
             let app_handle = app.handle();
             #[cfg(not(target_os = "linux"))]
-            match cursor_ghost::create(&app_handle) {
-                Ok(()) => cursor_ghost::start_monitor(app_handle.clone()),
-                Err(e) => eprintln!("Failed to create cursor ghost window: {}", e),
+            if let Err(e) = cursor_ghost::create(&app_handle) {
+                eprintln!("Failed to create cursor ghost window: {}", e);
             }
             if app_handle.get_webview_window("dashboard").is_none() {
                 if let Err(e) = window::create_dashboard_window(&app_handle) {

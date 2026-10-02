@@ -3,6 +3,21 @@ import { MousePointer2 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+/** Snap an entry point onto the nearest window edge (where the cursor crossed in). */
+export const snapToNearestEdge = (
+  x: number,
+  y: number,
+  width: number,
+  height: number
+): { x: number; y: number } => {
+  const distances = [x, width - x, y, height - y];
+  const nearest = distances.indexOf(Math.min(...distances));
+  if (nearest === 0) return { x: 0, y };
+  if (nearest === 1) return { x: width, y };
+  if (nearest === 2) return { x, y: 0 };
+  return { x, y: height };
+};
+
 export const CustomCursor = () => {
   const cursorRef = useRef<HTMLDivElement>(null);
   const positionRef = useRef({ x: 0, y: 0 });
@@ -43,23 +58,40 @@ export const CustomCursor = () => {
       }
     };
 
-    const setPointerVisible = (visible: boolean) => {
-      isVisibleRef.current = visible;
-      if (cursorRef.current) cursorRef.current.style.opacity = visible ? "1" : "0";
+    // Park a capturable arrow where the real cursor entered, so screen-share
+    // viewers see it stop at the window edge rather than disappear.
+    const handleMouseOver = (e: MouseEvent) => {
+      if (e.relatedTarget) return; // moved between elements, not into the window
+      const point = snapToNearestEdge(
+        e.clientX,
+        e.clientY,
+        window.innerWidth,
+        window.innerHeight
+      );
+      void invoke("show_cursor_ghost", point).catch(console.error);
     };
 
-    // The backend tracks the real cursor against the window (WebKit misses
-    // mouse-leave on this never-focused panel) and parks a capturable arrow at
-    // the edge it crossed, so viewers see it stop there instead of vanishing.
-    void invoke("set_cursor_ghost_enabled", { enabled: true }).catch(console.error);
+    // On exit, glide the parked arrow to where the cursor left so viewers see
+    // it travel there instead of jumping.
+    const handleMouseOut = (e: MouseEvent) => {
+      if (e.relatedTarget) return;
+      const point = snapToNearestEdge(
+        e.clientX,
+        e.clientY,
+        window.innerWidth,
+        window.innerHeight
+      );
+      void invoke("release_cursor_ghost", point).catch(console.error);
+    };
+
+    // The backend detects leaving (WebKit often misses mouseout on this
+    // never-focused panel) and releases the arrow; hide our pointer too.
     let disposed = false;
-    let unlistenInside: (() => void) | undefined;
-    listen<boolean>("cursor-ghost-inside", (event) => {
-      if (!event.payload) setPointerVisible(false);
-    })
+    let unlistenExit: (() => void) | undefined;
+    listen("cursor-ghost-exit", () => handleMouseLeave())
       .then((unlisten) => {
         if (disposed) unlisten();
-        else unlistenInside = unlisten;
+        else unlistenExit = unlisten;
       })
       .catch(console.error);
 
@@ -70,11 +102,15 @@ export const CustomCursor = () => {
     document.addEventListener("mousemove", handleMouseMove, { passive: true });
     document.addEventListener("mouseleave", handleMouseLeave);
     window.addEventListener("blur", handleWindowBlur);
+    document.addEventListener("mouseover", handleMouseOver);
+    document.addEventListener("mouseout", handleMouseOut);
 
     return () => {
       disposed = true;
-      unlistenInside?.();
-      void invoke("set_cursor_ghost_enabled", { enabled: false }).catch(console.error);
+      unlistenExit?.();
+      document.removeEventListener("mouseover", handleMouseOver);
+      document.removeEventListener("mouseout", handleMouseOut);
+      void invoke("hide_cursor_ghost").catch(console.error);
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseleave", handleMouseLeave);
       window.removeEventListener("blur", handleWindowBlur);
