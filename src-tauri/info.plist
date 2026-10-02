@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <!-- Hide app from macOS Dock -->
+  <key>LSUIElement</key>
+  <true/>
+  
   <!-- Microphone Access - Only for voice input, NOT for system audio capture -->
   <key>NSMicrophoneUsageDescription</key>
   <string>Pluely needs access to your microphone for voice input functionality. System audio capture uses virtual audio devices and does not access your microphone.</string>

@@ -15,7 +15,6 @@ import {
 } from "@/components";
 import {
   ChevronDownIcon,
-  SettingsIcon,
   WandIcon,
   RotateCcwIcon,
   ChevronUpIcon,
@@ -79,7 +78,6 @@ export const SettingsPanel = ({
   contextContent,
   setContextContent,
 }: SettingsPanelProps) => {
-  const [isOpen, setIsOpen] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<string>("");
 
@@ -136,30 +134,9 @@ export const SettingsPanel = ({
   };
 
   return (
-    <div className="rounded-lg border border-border/50 bg-muted/30 overflow-hidden">
-      {/* Settings Header - Always visible */}
-      <button
-        type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between p-3 hover:bg-muted/50 transition-colors"
-      >
-        <div className="flex items-center gap-2">
-          <SettingsIcon className="w-3.5 h-3.5 text-muted-foreground" />
-          <span className="text-xs font-medium">Settings</span>
-        </div>
-        <ChevronDownIcon
-          className={cn(
-            "w-4 h-4 text-muted-foreground transition-transform",
-            isOpen && "rotate-180"
-          )}
-        />
-      </button>
-
-      {/* Settings Content */}
-      {isOpen && (
-        <div className="px-3 pb-3 space-y-4">
-          {/* Recording Settings Section */}
-          <div className="space-y-3">
+    <div className="rounded-lg border border-border/50 bg-muted/30 p-3 space-y-4">
+      {/* Recording Settings Section */}
+      <div className="space-y-3">
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
               Recording
             </h4>
@@ -431,8 +408,6 @@ export const SettingsPanel = ({
               </div>
             )}
           </div>
-        </div>
-      )}
     </div>
   );
 };

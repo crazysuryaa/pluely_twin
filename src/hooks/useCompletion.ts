@@ -1,3 +1,4 @@
+import { isTypingTarget } from "./keyboardTarget";
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useWindowResize } from "./useWindow";
 import { useGlobalShortcuts } from "@/hooks";
@@ -52,7 +53,7 @@ interface CompletionState {
   conversationHistory: ChatMessage[];
 }
 
-export const useCompletion = () => {
+export const useCompletion = ({ manageWindow = true }: { manageWindow?: boolean } = {}) => {
   const {
     selectedAIProvider,
     allAiProviders,
@@ -765,6 +766,7 @@ export const useCompletion = () => {
     keepEngaged;
 
   useEffect(() => {
+    if (!manageWindow) return;
     resizeWindow(
       isPopoverOpen || micOpen || messageHistoryOpen || isFilesPopoverOpen
     );
@@ -774,6 +776,7 @@ export const useCompletion = () => {
     messageHistoryOpen,
     resizeWindow,
     isFilesPopoverOpen,
+    manageWindow,
   ]);
 
   // Auto scroll to bottom when response updates
@@ -800,6 +803,7 @@ export const useCompletion = () => {
   // Keyboard arrow key support for scrolling
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
       if (!isPopoverOpen) return;
 
       const activeScrollRef = scrollAreaRef.current || scrollAreaRef.current;

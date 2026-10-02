@@ -75,7 +75,7 @@ pub fn run() {
     let mut builder = builder
         .invoke_handler(tauri::generate_handler![
             get_app_version,
-            window::set_window_height,
+            window::set_window_size,
             window::open_dashboard,
             window::toggle_dashboard,
             window::move_window,
@@ -130,7 +130,10 @@ pub fn run() {
             // Setup main window positioning
             window::setup_main_window(app).expect("Failed to setup main window");
             #[cfg(target_os = "macos")]
-            init(app.app_handle());
+            {
+                init(app.app_handle());
+                let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+            }
             let app_handle = app.handle();
             if app_handle.get_webview_window("dashboard").is_none() {
                 if let Err(e) = window::create_dashboard_window(&app_handle) {

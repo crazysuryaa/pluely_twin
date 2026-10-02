@@ -9,6 +9,7 @@ import {
   PopoverTrigger,
 } from "@/components";
 import { useWindowResize } from "@/hooks";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export const DragButton = () => {
   const { hasActiveLicense } = useApp();
@@ -25,7 +26,7 @@ export const DragButton = () => {
     return (
       <Popover open={isOpen} onOpenChange={setIsOpen}>
         <PopoverTrigger asChild className="border-none hover:bg-transparent">
-          <Button variant="ghost" size="icon" className={`-ml-[2px] w-fit`}>
+          <Button variant="ghost" size="icon" className="-ml-[2px] w-fit">
             <GripVerticalIcon className="h-4 w-4" />
           </Button>
         </PopoverTrigger>
@@ -57,10 +58,17 @@ export const DragButton = () => {
     <Button
       variant="ghost"
       size="icon"
-      className={`-ml-[2px] w-fit`}
-      data-tauri-drag-region={hasActiveLicense}
+      aria-label="Drag window"
+      className="-ml-[2px] w-fit cursor-grab active:cursor-grabbing text-white/50 hover:text-white hover:bg-white/10"
+      data-tauri-drag-region="true"
+      title="Drag window"
+      onMouseDown={(e) => {
+        if (e.button === 0) {
+          void getCurrentWindow().startDragging().catch(console.error);
+        }
+      }}
     >
-      <GripVerticalIcon className="h-4 w-4" />
+      <GripVerticalIcon className="h-4 w-4 pointer-events-none" />
     </Button>
   );
 };

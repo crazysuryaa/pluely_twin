@@ -70,16 +70,173 @@ pub fn center_window_completely(window: &WebviewWindow) -> Result<(), Box<dyn st
     Ok(())
 }
 
+#[cfg(test)]
+mod layout_tests {
+    use super::clamp_workspace_rect;
+
+    #[test]
+    fn preserves_visible_position_instead_of_recentering() {
+        assert_eq!(
+            clamp_workspace_rect(760.0, 600.0, 100.0, 80.0, (0.0, 0.0, 1512.0, 982.0), true),
+            (760.0, 600.0, 100.0, 80.0)
+        );
+    }
+
+    #[test]
+    fn clamps_offscreen_position_and_bounds_size_on_negative_origin_monitor() {
+        assert_eq!(
+            clamp_workspace_rect(
+                1000.0,
+                800.0,
+                -100.0,
+                500.0,
+                (-900.0, 0.0, 900.0, 650.0),
+                true
+            ),
+            (868.0, 586.0, -868.0, 64.0)
+        );
+    }
+
+    #[test]
+    fn expanded_minimum_never_exceeds_small_monitor() {
+        assert_eq!(
+            clamp_workspace_rect(100.0, 100.0, 10.0, 10.0, (0.0, 0.0, 400.0, 300.0), true),
+            (368.0, 236.0, 10.0, 10.0)
+        );
+        assert_eq!(
+            clamp_workspace_rect(460.0, 54.0, 10.0, 10.0, (0.0, 0.0, 1512.0, 982.0), false),
+            (460.0, 54.0, 10.0, 10.0)
+        );
+    }
+}
+
+// Geometry is logical pixels; monitor origins may be negative.
+fn clamp_workspace_rect(
+    width: f64,
+    height: f64,
+    x: f64,
+    y: f64,
+    monitor: (f64, f64, f64, f64),
+    expanded: bool,
+) -> (f64, f64, f64, f64) {
+    let (left, top, monitor_width, monitor_height) = monitor;
+    let max_width = (monitor_width - 32.0).max(1.0);
+    let max_height = (monitor_height - 64.0).max(1.0);
+    let width = width.max(if expanded { 520.0 } else { 1.0 }).min(max_width);
+    let height = height
+        .max(if expanded { 360.0 } else { 1.0 })
+        .min(max_height);
+    (
+        width,
+        height,
+        x.clamp(left, left + monitor_width - width),
+        y.clamp(top, top + monitor_height - height),
+    )
+}
+
 #[tauri::command]
-pub fn set_window_height(window: tauri::WebviewWindow, height: u32) -> Result<(), String> {
-    use tauri::{LogicalSize, Size};
+pub fn set_window_size(
+    window: tauri::WebviewWindow,
+    width: u32,
+    height: u32,
+    expanded: Option<bool>,
+    x: Option<f64>,
+    y: Option<f64>,
+) -> Result<(), String> {
+    use tauri::{LogicalPosition, LogicalSize, Position, Size};
 
-    // Simply set the window size with fixed width and new height
-    let new_size = LogicalSize::new(600.0, height as f64);
+    if width == 0
+        || height == 0
+        || x.is_some() != y.is_some()
+        || x.is_some_and(|value| !value.is_finite())
+        || y.is_some_and(|value| !value.is_finite())
+    {
+        return Err("Invalid window geometry".into());
+    }
+    // Legacy callers can continue supplying only width and height.
+    let expanded = expanded.unwrap_or(height > 54);
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let current_position = window.outer_position().map_err(|e| e.to_string())?;
+    let logical_position = current_position.to_logical::<f64>(scale);
+    let desired_x = x.unwrap_or(logical_position.x);
+    let desired_y = y.unwrap_or(logical_position.y);
+    let monitors = window.available_monitors().map_err(|e| e.to_string())?;
+    let saved_monitor = monitors.into_iter().find(|monitor| {
+        let scale = monitor.scale_factor();
+        let origin = monitor.position().to_logical::<f64>(scale);
+        let size = monitor.size().to_logical::<f64>(scale);
+        desired_x >= origin.x
+            && desired_x < origin.x + size.width
+            && desired_y >= origin.y
+            && desired_y < origin.y + size.height
+    });
+    let monitor = saved_monitor
+        .or(window.current_monitor().map_err(|e| e.to_string())?)
+        .or(window.primary_monitor().map_err(|e| e.to_string())?);
+    let (width, height, target_x, target_y, max_width, max_height) = if let Some(monitor) = monitor
+    {
+        let scale = monitor.scale_factor();
+        let size = monitor.size().to_logical::<f64>(scale);
+        let origin = monitor.position().to_logical::<f64>(scale);
+        let (width, height, x, y) = clamp_workspace_rect(
+            width as f64,
+            height as f64,
+            desired_x,
+            desired_y,
+            (origin.x, origin.y, size.width, size.height),
+            expanded,
+        );
+        (
+            width,
+            height,
+            x,
+            y,
+            (size.width - 32.0).max(1.0),
+            (size.height - 64.0).max(1.0),
+        )
+    } else {
+        (
+            width as f64,
+            height as f64,
+            desired_x,
+            desired_y,
+            f64::MAX,
+            f64::MAX,
+        )
+    };
+
+    // Clear the expanded minimum before shrinking the idle pill.
     window
-        .set_size(Size::Logical(new_size))
-        .map_err(|e| format!("Failed to resize window: {}", e))?;
-
+        .set_min_size(if expanded {
+            Some(Size::Logical(LogicalSize::new(
+                520.0_f64.min(max_width),
+                360.0_f64.min(max_height),
+            )))
+        } else {
+            None
+        })
+        .map_err(|e| format!("Failed to set window minimum: {e}"))?;
+    window
+        .set_max_size(
+            if expanded && max_width.is_finite() && max_width != f64::MAX {
+                Some(Size::Logical(LogicalSize::new(max_width, max_height)))
+            } else {
+                None
+            },
+        )
+        .map_err(|e| format!("Failed to set window maximum: {e}"))?;
+    window
+        .set_size(Size::Logical(LogicalSize::new(width, height)))
+        .map_err(|e| format!("Failed to resize window: {e}"))?;
+    window
+        .set_resizable(expanded)
+        .map_err(|e| format!("Failed to set window resizability: {e}"))?;
+    // Never recenter: only move to restore saved coordinates or bring an off-screen edge back.
+    if (target_x - logical_position.x).abs() > 0.5 || (target_y - logical_position.y).abs() > 0.5 {
+        window
+            .set_position(Position::Logical(LogicalPosition::new(target_x, target_y)))
+            .map_err(|e| format!("Failed to reposition window: {e}"))?;
+    }
     Ok(())
 }
 

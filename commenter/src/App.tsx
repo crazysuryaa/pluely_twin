@@ -791,8 +791,14 @@ export default function App() {
     <main
       style={{
         maxWidth: 1440,
+        width: "100%",
+        height: "100dvh",
         margin: "0 auto",
-        padding: 24,
+        padding: 12,
+        boxSizing: "border-box",
+        display: "flex",
+        flexDirection: "column",
+        overflow: sessionActive ? "hidden" : "auto",
         fontFamily: "sans-serif",
       }}
     >
@@ -802,13 +808,16 @@ export default function App() {
           justifyContent: "space-between",
           alignItems: "start",
           gap: 16,
+          flex: "0 0 auto",
         }}
       >
         <div>
-          <h1 style={{ marginBottom: 6 }}>Twin Commenter</h1>
-          <div>{status}</div>
+          <h1 style={{ margin: "0 0 3px", fontSize: 22, lineHeight: 1.1 }}>
+            Twin Commenter
+          </h1>
+          <div style={{ fontSize: 13, lineHeight: 1.2 }}>{status}</div>
           {sessionId ? (
-            <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>
+            <div style={{ fontSize: 11, opacity: 0.6, marginTop: 2 }}>
               Session {sessionId.slice(0, 8)}
               {!hostConnected ? " · Host temporarily offline" : ""}
             </div>
@@ -887,47 +896,28 @@ export default function App() {
           <button onClick={connect}>Connect</button>
         </section>
       ) : (
-        <>
-          {!connected ? (
-            <div
-              style={{
-                marginTop: 18,
-                padding: 12,
-                border: "1px solid #444",
-                borderRadius: 8,
-              }}
-            >
-              Reconnecting automatically. You can keep typing comments; they
-              remain queued until the connection returns.
-            </div>
-          ) : null}
-
-          {connected && !hostConnected ? (
-            <div
-              style={{
-                marginTop: 18,
-                padding: 12,
-                border: "1px solid #444",
-                borderRadius: 8,
-              }}
-            >
-              Relay is connected. The Host is temporarily offline and is
-              reconnecting. Comments remain queued by the relay.
-            </div>
-          ) : null}
-
+        <div
+          style={{
+            display: "flex",
+            flex: 1,
+            minHeight: 0,
+            flexDirection: "column",
+          }}
+        >
           <div
             style={{
               display: "grid",
               gridTemplateColumns: "minmax(0, 1.65fr) minmax(320px, 0.85fr)",
               gap: 16,
-              marginTop: 20,
-              minHeight: "calc(100vh - 150px)",
+              marginTop: 10,
+              flex: "0 1 84dvh",
+              minHeight: 0,
             }}
           >
             <section
               style={{
                 minWidth: 0,
+                minHeight: 0,
                 border: "1px solid #d8d8d8",
                 borderRadius: 12,
                 overflow: "hidden",
@@ -963,7 +953,7 @@ export default function App() {
                 id="host-screen-surface"
                 style={{
                   flex: 1,
-                  minHeight: 520,
+                  minHeight: 0,
                   display: "grid",
                   placeItems: "center",
                   overflow: "hidden",
@@ -1014,6 +1004,7 @@ export default function App() {
             <section
               style={{
                 minWidth: 0,
+                minHeight: 0,
                 border: "1px solid #d8d8d8",
                 borderRadius: 12,
                 overflow: "hidden",
@@ -1120,7 +1111,7 @@ export default function App() {
               </form>
             </section>
           </div>
-        </>
+        </div>
       )}
     </main>
   );

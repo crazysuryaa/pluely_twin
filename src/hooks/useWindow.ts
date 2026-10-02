@@ -1,84 +1,66 @@
 import { invoke } from "@tauri-apps/api/core";
+import { currentMonitor } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useCallback, useEffect } from "react";
+import { createWindowLayoutController } from "./windowLayout";
 
-// Helper function to check if any popover is open in the DOM
-const isAnyPopoverOpen = (): boolean => {
-  const popoverContents = document.querySelectorAll(
-    "[data-radix-popper-content-wrapper]"
-  );
-  return popoverContents.length > 0;
-};
+let layoutController: ReturnType<typeof createWindowLayoutController> | undefined;
+
+function getLayoutController() {
+  if (layoutController) return layoutController;
+  const nativeWindow = getCurrentWebviewWindow();
+  // Tauri event geometry is physical pixels; storage and commands use logical pixels.
+  let scale = 1;
+  const scaleReady = nativeWindow.scaleFactor().then((value) => { scale = value; });
+  layoutController = createWindowLayoutController({
+    storage: {
+      getItem: (key) => globalThis.localStorage.getItem(key),
+      setItem: (key, value) => globalThis.localStorage.setItem(key, value),
+    },
+    availableSize: async () => {
+      await scaleReady;
+      const monitor = await currentMonitor();
+      return monitor
+        ? { width: monitor.size.width / monitor.scaleFactor, height: monitor.size.height / monitor.scaleFactor }
+        : { width: globalThis.screen.availWidth, height: globalThis.screen.availHeight };
+    },
+    apply: (geometry) => invoke("set_window_size", { ...geometry }),
+    onResized: async (listener) => {
+      await scaleReady;
+      const stopScale = await nativeWindow.onScaleChanged(({ payload }) => { scale = payload.scaleFactor; });
+      try {
+        const stopResize = await nativeWindow.onResized(({ payload }) => {
+          listener({ width: payload.width / scale, height: payload.height / scale });
+        });
+        return () => { stopResize(); stopScale(); };
+      } catch (error) { stopScale(); throw error; }
+    },
+    onMoved: async (listener) => {
+      await scaleReady;
+      return nativeWindow.onMoved(({ payload }) => {
+        listener({ x: payload.x / scale, y: payload.y / scale });
+      });
+    },
+    reportError: (error) => console.error("Window geometry/listener error:", error),
+  });
+  return layoutController;
+}
 
 export const useWindowResize = () => {
   const resizeWindow = useCallback(async (expanded: boolean) => {
     try {
-      const window = getCurrentWebviewWindow();
-
-      if (!expanded && isAnyPopoverOpen()) {
-        return;
-      }
-
-      const newHeight = expanded ? 600 : 54;
-
-      await invoke("set_window_height", {
-        window,
-        height: newHeight,
-      });
+      await getLayoutController().resize(expanded);
     } catch (error) {
       console.error("Failed to resize window:", error);
     }
   }, []);
 
-  // Setup drag handling and popover monitoring
   useEffect(() => {
-    let isDragging = false;
+    try { return getLayoutController().attach(); }
+    catch (error) { console.error("Failed to setup window geometry listeners:", error); }
+  }, []);
 
-    const handleMouseDown = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      const isDragRegion = target.closest('[data-tauri-drag-region="true"]');
-
-      if (isDragRegion) {
-        isDragging = true;
-      }
-    };
-
-    const handleMouseUp = async () => {
-      if (isDragging) {
-        isDragging = false;
-
-        setTimeout(() => {
-          if (!isAnyPopoverOpen()) {
-            resizeWindow(false);
-          }
-        }, 100);
-      }
-    };
-
-    const observer = new MutationObserver(() => {
-      if (!isAnyPopoverOpen()) {
-        resizeWindow(false);
-      }
-    });
-
-    // Observe the body for changes to detect popover open/close
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ["data-state"],
-    });
-
-    document.addEventListener("mousedown", handleMouseDown);
-    document.addEventListener("mouseup", handleMouseUp);
-
-    return () => {
-      document.removeEventListener("mousedown", handleMouseDown);
-      document.removeEventListener("mouseup", handleMouseUp);
-      observer.disconnect();
-    };
-  }, [resizeWindow]);
-
+  // No DOM observers or drag handlers: expansion/collapse is exclusively explicit.
   return { resizeWindow };
 };
 
