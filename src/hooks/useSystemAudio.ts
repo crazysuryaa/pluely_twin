@@ -13,7 +13,6 @@ import {
 } from "@/config";
 import {
   safeLocalStorage,
-  shouldUsePluelyAPI,
   generateConversationTitle,
   saveConversation,
   CONVERSATION_SAVE_DEBOUNCE_MS,
@@ -317,8 +316,7 @@ Use this context when relevant. Do not invent facts that are not supported by th
             }
             const audioBlob = new Blob([bytes], { type: "audio/wav" });
 
-            const usePluelyAPI = await shouldUsePluelyAPI();
-            if (!selectedSttProvider.provider && !usePluelyAPI) {
+            if (!selectedSttProvider.provider) {
               setError("No speech provider selected.");
               return;
             }
@@ -327,7 +325,7 @@ Use this context when relevant. Do not invent facts that are not supported by th
               (p) => p.id === selectedSttProvider.provider
             );
 
-            if (!providerConfig && !usePluelyAPI) {
+            if (!providerConfig) {
               setError("Speech provider config not found.");
               return;
             }
@@ -649,8 +647,7 @@ Use this context when relevant. Do not invent facts that are not supported by th
         let fullResponse = "";
         let isFirstChunk = true;
 
-        const usePluelyAPI = await shouldUsePluelyAPI();
-        if (!selectedAIProvider.provider && !usePluelyAPI) {
+        if (!selectedAIProvider.provider) {
           setError("No AI provider selected.");
           return;
         }
@@ -658,14 +655,14 @@ Use this context when relevant. Do not invent facts that are not supported by th
         const provider = allAiProviders.find(
           (p) => p.id === selectedAIProvider.provider
         );
-        if (!provider && !usePluelyAPI) {
+        if (!provider) {
           setError("AI provider config not found.");
           return;
         }
 
         try {
           for await (const chunk of fetchAIResponse({
-            provider: usePluelyAPI ? undefined : provider,
+            provider,
             selectedProvider: selectedAIProvider,
             systemPrompt: prompt,
             history: previousMessages,
