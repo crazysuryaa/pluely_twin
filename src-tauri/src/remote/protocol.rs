@@ -82,4 +82,13 @@ pub struct RemoteComment {
     pub source: String,
     pub text: String,
     pub device_name: Option<String>,
+    #[serde(default = "default_timestamp")]
+    pub timestamp: u64,
+}
+
+fn default_timestamp() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }

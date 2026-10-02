@@ -105,7 +105,7 @@ const App = () => {
               onOpenDashboard={openDashboard}
               onQuit={quit}
             />
-            <div hidden={!expanded} className={expanded ? "min-h-0 flex-1" : "hidden"}>
+            <div hidden={!expanded} className={expanded ? "min-h-0 min-w-0 flex-1 w-full" : "hidden"}>
               <SystemAudio
                 {...systemAudio}
                 remoteSession={remoteSession}

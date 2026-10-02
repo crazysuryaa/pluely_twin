@@ -51,7 +51,7 @@ export const SessionCompletion = ({
   };
 
   const composer = (
-    <fieldset disabled={isHidden} aria-label="Typed completion composer" className="flex min-w-0 items-center gap-2 border-0 p-0">
+    <fieldset disabled={isHidden} aria-label="Typed completion composer" className="flex w-full min-w-0 items-center gap-2 border-0 p-0">
       {/* Screenshot and attachment buttons to the left alongside audio */}
       <div className="flex items-center gap-1 shrink-0">
         <Audio {...completion} />
@@ -111,7 +111,7 @@ export const SessionCompletion = ({
     completion.keepEngaged || completion.conversationHistory.length
   );
   const response = hasResponse ? (
-    <section ref={attachResponseRef} aria-label="Typed AI response" className="min-w-0">
+    <section ref={attachResponseRef} aria-label="Typed AI response" className="w-full min-w-0">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
         <h3 className="text-xs font-semibold">{completion.keepEngaged ? "Conversation Mode" : "AI Response"}</h3>
         <div className="flex items-center gap-2">

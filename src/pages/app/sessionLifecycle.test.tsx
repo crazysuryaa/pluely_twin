@@ -5,11 +5,11 @@ const audio = vi.hoisted(() => ({ capturing: false, startCapture: vi.fn(async ()
 vi.mock("@/hooks", () => ({ useApp: () => ({isHidden:false, systemAudio:audio}) }));
 vi.mock("@/contexts", () => ({useApp: () => ({customizable:{cursor:{type:"default"}}})}));
 vi.mock("@/hooks/useRemoteSessionStatus", () => ({useRemoteSessionStatus: () => ({active:false})}));
-vi.mock("@/components", () => ({CustomCursor: () => null}));
+vi.mock("@/components", () => ({CustomCursor: () => null, DragButton: () => null}));
 vi.mock("./components", () => ({SystemAudio: ({composer}: {composer: React.ReactNode}) => <section aria-label="Session workspace">{composer}</section>}));
 vi.mock("./components/completion/SessionCompletion", () => ({SessionCompletion: ({children}: {children: (slots: object) => React.ReactNode}) => children({composer:<input aria-label="Ask Pluely" />,response:null,hasResponse:false})}));
 vi.mock("@tauri-apps/api/core", () => ({invoke: vi.fn(async () => undefined)}));
-vi.mock("@tauri-apps/api/window", () => ({getCurrentWindow: () => ({startResizeDragging: vi.fn()})}));
+vi.mock("@tauri-apps/api/window", () => ({getCurrentWindow: () => ({startResizeDragging: vi.fn(), startDragging: vi.fn()})}));
 vi.mock("@/lib", () => ({getPlatform: () => "macos"}));
 vi.mock("@/layouts", () => ({ErrorLayout: () => <p>Error</p>}));
 import App from "./index";

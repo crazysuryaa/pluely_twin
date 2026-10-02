@@ -72,6 +72,7 @@ export interface RemoteComment {
   source: string;
   text: string;
   device_name?: string | null;
+  timestamp?: number;
 }
 
 export type useSystemAudioType = ReturnType<typeof useSystemAudio>;
@@ -160,9 +161,13 @@ Use this context when relevant. Do not invent facts that are not supported by th
         remoteCommentUnlisten = await listen<RemoteComment>(
           "remote-comment",
           (event) => {
+            const commentWithTimestamp: RemoteComment = {
+              ...event.payload,
+              timestamp: event.payload.timestamp || Date.now(),
+            };
             setRemoteComments((current) => [
               ...current.slice(-49),
-              event.payload,
+              commentWithTimestamp,
             ]);
             setIsPopoverOpen(true);
           }

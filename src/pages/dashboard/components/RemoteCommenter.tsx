@@ -25,6 +25,7 @@ type RemoteComment = {
   source: string;
   text: string;
   device_name?: string | null;
+  timestamp?: number;
 };
 
 type ConnectionEvent = {
@@ -74,7 +75,11 @@ export const RemoteCommenter = () => {
       .catch(() => setScreenShareStatus({ status: "stopped" }));
 
     const stopComment = listen<RemoteComment>("remote-comment", (event) => {
-      setComments((current) => [...current.slice(-99), event.payload]);
+      const commentWithTimestamp: RemoteComment = {
+        ...event.payload,
+        timestamp: event.payload.timestamp || Date.now(),
+      };
+      setComments((current) => [...current.slice(-99), commentWithTimestamp]);
     });
 
     const stopStatus = listen<SessionInfo | { active: false }>(

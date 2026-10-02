@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { HeadphonesIcon, MessageSquareIcon, SparklesIcon, Loader2, AlertCircleIcon } from "lucide-react";
+import { HeadphonesIcon, MessageSquareIcon, SparklesIcon, Loader2, AlertCircleIcon, PanelLeftClose } from "lucide-react";
 import type { ChatConversation } from "@/types";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +23,7 @@ export interface ListeningPaneProps {
   remoteComments?: RemoteComment[];
   selectedMessageId?: string | null;
   onSelectMessage?: (id: string | null) => void;
+  onMinimize?: () => void;
 }
 
 interface UnifiedHistoryEntry {
@@ -45,6 +46,7 @@ export const ListeningPane = ({
   remoteComments = [],
   selectedMessageId = null,
   onSelectMessage,
+  onMinimize,
 }: ListeningPaneProps) => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -67,8 +69,8 @@ export const ListeningPane = ({
       id: comment.id,
       role: "commenter",
       content: comment.text,
-      timestamp: comment.timestamp || 0,
-      authorName: comment.device_name || "Commenter",
+      timestamp: comment.timestamp || Date.now(),
+      authorName: comment.device_name || "Twin",
     });
   }
 
@@ -86,7 +88,7 @@ export const ListeningPane = ({
 
   // Auto-scroll to bottom on update
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    bottomRef.current?.scrollIntoView?.({ behavior: "smooth" });
   }, [historyEntries.length, pendingContent, isProcessing, isAIProcessing, isHearingSpeech]);
 
   const formatTime = (ts?: number) => {
@@ -134,11 +136,23 @@ export const ListeningPane = ({
             </>
           )}
         </div>
-        {historyEntries.length > 0 && (
-          <span className="text-[10px] text-zinc-400 select-none">
-            {historyEntries.length} {historyEntries.length === 1 ? "entry" : "entries"}
-          </span>
-        )}
+        <div className="flex items-center gap-1">
+          {historyEntries.length > 0 && (
+            <span className="text-[10px] text-zinc-400 select-none mr-1">
+              {historyEntries.length} {historyEntries.length === 1 ? "entry" : "entries"}
+            </span>
+          )}
+          {onMinimize && (
+            <button
+              onClick={onMinimize}
+              title="Minimize chat preview"
+              aria-label="Minimize chat preview"
+              className="flex h-6 w-6 items-center justify-center rounded text-[#a0a5ad] hover:text-white hover:bg-white/10 transition-colors"
+            >
+              <PanelLeftClose className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* History scrollable area - latest at bottom */}
