@@ -311,7 +311,13 @@ export const SystemAudio = (
             </div>
           </div>
 
-          <ScrollArea className="h-full w-full min-h-0 min-w-0 flex-1" ref={scrollAreaRef}>
+          {/* Radix wraps content in a display:table box that grows to the widest
+              line (e.g. code), which clips it; keep it at panel width so code
+              blocks scroll horizontally on their own. */}
+          <ScrollArea
+            className="h-full w-full min-h-0 min-w-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:!block"
+            ref={scrollAreaRef}
+          >
             <div className="w-full space-y-4 p-4">
               {/* Session settings view when open */}
               {settingsOpen && (
