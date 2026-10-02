@@ -1,3 +1,4 @@
+import { isTypingTarget } from "./keyboardTarget";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useWindowResize, useGlobalShortcuts } from ".";
 import { invoke } from "@tauri-apps/api/core";
@@ -98,6 +99,7 @@ export function useSystemAudio() {
   const [isContinuousMode, setIsContinuousMode] = useState<boolean>(false);
   const [isRecordingInContinuousMode, setIsRecordingInContinuousMode] =
     useState<boolean>(false);
+  const [isHearingSpeech, setIsHearingSpeech] = useState<boolean>(false);
 
   const [conversation, setConversation] = useState<ChatConversation>({
     id: "",
@@ -264,6 +266,7 @@ Use this context when relevant. Do not invent facts that are not supported by th
         discardedUnlisten = await listen("speech-discarded", (event) => {
           const reason = event.payload as string;
           console.log("Speech discarded:", reason);
+          setIsHearingSpeech(false);
           // Don't show error - this is expected behavior
         });
       } catch (err) {
@@ -285,11 +288,19 @@ Use this context when relevant. Do not invent facts that are not supported by th
   // Handle single speech detection event (both VAD and continuous modes)
   useEffect(() => {
     let speechUnlisten: (() => void) | undefined;
+    let speechStartUnlisten: (() => void) | undefined;
 
     const setupEventListener = async () => {
       try {
+        speechStartUnlisten = await listen("speech-start", () => {
+          if (capturing) {
+            setIsHearingSpeech(true);
+          }
+        });
+
         speechUnlisten = await listen("speech-detected", async (event) => {
           try {
+            setIsHearingSpeech(false);
             if (!capturing) return;
 
             const base64Audio = event.payload as string;
@@ -318,7 +329,7 @@ Use this context when relevant. Do not invent facts that are not supported by th
 
             setIsProcessing(true);
 
-            // Add timeout wrapper for STT request (30 seconds)
+            // Add timeout wrapper for STT request (15 seconds)
             const sttPromise = fetchSTT({
               provider: providerConfig,
               selectedProvider: selectedSttProvider,
@@ -327,8 +338,8 @@ Use this context when relevant. Do not invent facts that are not supported by th
 
             const timeoutPromise = new Promise<string>((_, reject) => {
               setTimeout(
-                () => reject(new Error("Speech transcription timed out (30s)")),
-                30000
+                () => reject(new Error("Speech transcription timed out (15s)")),
+                15000
               );
             });
 
@@ -426,6 +437,7 @@ Use this context when relevant. Do not invent facts that are not supported by th
             setError("Failed to process speech");
           } finally {
             setIsProcessing(false);
+            setIsHearingSpeech(false);
           }
         });
       } catch (err) {
@@ -437,6 +449,7 @@ Use this context when relevant. Do not invent facts that are not supported by th
 
     return () => {
       if (speechUnlisten) speechUnlisten();
+      if (speechStartUnlisten) speechStartUnlisten();
     };
   }, [
     capturing,
@@ -902,7 +915,7 @@ Use this context when relevant. Do not invent facts that are not supported by th
       remoteComments.length > 0 ||
       !!error;
     setIsPopoverOpen(shouldOpenPopover);
-    resizeWindow(shouldOpenPopover);
+    // The session shell owns native sizing; capture updates never resize it.
   }, [
     capturing,
     setupRequired,
@@ -1033,6 +1046,7 @@ Use this context when relevant. Do not invent facts that are not supported by th
   // Keyboard arrow key support for scrolling (local shortcut)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
       if (!isPopoverOpen) return;
 
       const scrollElement = scrollAreaRef.current?.querySelector(
@@ -1088,6 +1102,7 @@ Use this context when relevant. Do not invent facts that are not supported by th
   // Keyboard shortcuts for continuous mode recording (local shortcuts)
   useEffect(() => {
     const handleRecordingShortcuts = (e: KeyboardEvent) => {
+      if (isTypingTarget(e.target)) return;
       if (!isPopoverOpen || !isContinuousMode) return;
       if (isProcessing || isAIProcessing) return;
 
@@ -1138,6 +1153,7 @@ Use this context when relevant. Do not invent facts that are not supported by th
   return {
     capturing,
     isProcessing,
+    isHearingSpeech,
     isAIProcessing,
     lastTranscription,
     lastAIResponse,

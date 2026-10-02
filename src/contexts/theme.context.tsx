@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { STORAGE_KEYS } from "@/config/";
+import { emit, listen } from "@tauri-apps/api/event";
 
 type Theme = "dark" | "light" | "system";
 
@@ -53,7 +54,32 @@ export function ThemeProvider({
     };
 
     window.addEventListener("storage", handleStorageChange);
-    return () => window.removeEventListener("storage", handleStorageChange);
+
+    // Cross-window synchronization via Tauri events
+    let unlistenTransparency: (() => void) | undefined;
+    let unlistenTheme: (() => void) | undefined;
+
+    void listen<number>("transparency-changed", (event) => {
+      if (typeof event.payload === "number") {
+        setTransparency(event.payload);
+      }
+    }).then((stop) => {
+      unlistenTransparency = stop;
+    }).catch(console.error);
+
+    void listen<Theme>("theme-changed", (event) => {
+      if (event.payload) {
+        setTheme(event.payload);
+      }
+    }).then((stop) => {
+      unlistenTheme = stop;
+    }).catch(console.error);
+
+    return () => {
+      window.removeEventListener("storage", handleStorageChange);
+      unlistenTransparency?.();
+      unlistenTheme?.();
+    };
   }, [storageKey]);
 
   useEffect(() => {
@@ -89,7 +115,7 @@ export function ThemeProvider({
     };
   }, [theme]);
 
-  // Apply transparency globally
+  // Apply transparency globally (controls background opacity without unwanted backdrop blur)
   useEffect(() => {
     const root = window.document.documentElement;
     const opacity = (100 - transparency) / 100;
@@ -97,17 +123,14 @@ export function ThemeProvider({
     // Apply opacity to CSS variables
     root.style.setProperty("--opacity", opacity.toString());
 
-    // Apply backdrop filter when transparency is active
-    if (transparency > 0) {
-      root.style.setProperty("--backdrop-blur", "blur(12px)");
-    } else {
-      root.style.setProperty("--backdrop-blur", "none");
-    }
+    // Do not apply blur filters to the background
+    root.style.setProperty("--backdrop-blur", "none");
   }, [transparency]);
 
-  const onSetTransparency = (transparency: number) => {
-    localStorage.setItem(STORAGE_KEYS.TRANSPARENCY, transparency.toString());
-    setTransparency(transparency);
+  const onSetTransparency = (newTransparency: number) => {
+    localStorage.setItem(STORAGE_KEYS.TRANSPARENCY, newTransparency.toString());
+    setTransparency(newTransparency);
+    void emit("transparency-changed", newTransparency).catch(console.error);
   };
 
   const value = {
@@ -115,6 +138,7 @@ export function ThemeProvider({
     setTheme: (newTheme: Theme) => {
       localStorage.setItem(storageKey, newTheme);
       setTheme(newTheme);
+      void emit("theme-changed", newTheme).catch(console.error);
     },
     isSystemThemeDark,
     transparency,
