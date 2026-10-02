@@ -191,6 +191,16 @@
   background: transparent !important;
 }
 
+/* Code from the commenter: horizontal scrollbar matches the panel's vertical
+   ScrollArea thumb (bg-border) rather than the faint global scrollbar. */
+.verbatim-scroll {
+  scrollbar-color: var(--border) transparent !important;
+}
+
+.verbatim-scroll::-webkit-scrollbar-thumb {
+  background: var(--border) !important;
+}
+
 * {
   cursor: var(--cursor-type) !important;
 }

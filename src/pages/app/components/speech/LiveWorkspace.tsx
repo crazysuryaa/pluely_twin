@@ -38,7 +38,7 @@ export const LiveWorkspace = ({
         className={`min-h-0 min-w-0 flex-1 w-full ${
           isFullScreen
             ? "flex w-full flex-col"
-            : "grid grid-cols-[minmax(180px,0.28fr)_minmax(0,0.72fr)] w-full"
+            : "grid grid-cols-[minmax(180px,28fr)_minmax(0,72fr)] w-full"
         }`}
       >
         {!isFullScreen && (

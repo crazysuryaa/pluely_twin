@@ -2,10 +2,11 @@
 //! (content-protected) main window, so viewers see the cursor stop at the
 //! window edge instead of vanishing. Locally the user sees Pluely's own
 //! invisible-to-capture pointer inside the window.
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tauri::{
-    AppHandle, LogicalPosition, Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    AppHandle, Emitter, LogicalPosition, Manager, Runtime, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
 };
 
 pub const LABEL: &str = "cursor-ghost";
@@ -45,11 +46,18 @@ pub fn create<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
 // Bumped on every show/hide so an in-flight glide stops when superseded.
 static GENERATION: AtomicU64 = AtomicU64::new(0);
+// Only track while the page uses the invisible cursor (see CustomCursor.tsx).
+static ENABLED: AtomicBool = AtomicBool::new(false);
 const GLIDE: Duration = Duration::from_millis(180);
 const FRAME: Duration = Duration::from_millis(8);
+const POLL: Duration = Duration::from_millis(16);
+/// Tells the main page whether the real cursor is over the window, so it can
+/// show/hide Pluely's own pointer. WebKit doesn't reliably fire mouse-leave
+/// for this never-key panel, so enter/leave is decided here instead.
+pub const INSIDE_EVENT: &str = "cursor-ghost-inside";
 
 /// Screen position (logical) for the ghost window so the arrow tip lands on
-/// `x`/`y`, given in logical coordinates inside the main window's webview.
+/// `x`/`y`, given in logical coordinates inside the main window.
 fn ghost_position<R: Runtime>(
     app: &AppHandle<R>,
     x: f64,
@@ -74,30 +82,42 @@ fn ghost_window<R: Runtime>(app: &AppHandle<R>) -> Result<WebviewWindow<R>, Stri
         .ok_or_else(|| "Cursor ghost window not found".to_string())
 }
 
-#[tauri::command]
-pub fn show_cursor_ghost<R: Runtime>(app: AppHandle<R>, x: f64, y: f64) -> Result<(), String> {
+/// Snap a point inside a `width` x `height` window onto its nearest edge
+/// (where the cursor crossed in or out).
+fn snap_to_nearest_edge(x: f64, y: f64, width: f64, height: f64) -> (f64, f64) {
+    let distances = [x, width - x, y, height - y];
+    let nearest = (0..4)
+        .min_by(|&a, &b| distances[a].total_cmp(&distances[b]))
+        .unwrap_or(0);
+    match nearest {
+        0 => (0.0, y),
+        1 => (width, y),
+        2 => (x, 0.0),
+        _ => (x, height),
+    }
+}
+
+fn park<R: Runtime>(app: &AppHandle<R>, x: f64, y: f64) -> Result<(), String> {
     GENERATION.fetch_add(1, Ordering::SeqCst);
-    let target = ghost_position(&app, x, y)?;
-    ghost_window(&app)?
+    let target = ghost_position(app, x, y)?;
+    ghost_window(app)?
         .set_position(target)
         .map_err(|e| e.to_string())
 }
 
-/// Glides the parked arrow to the exit point, then parks it off-screen so
+/// Glides the parked arrow to the exit point, then moves it off-screen so
 /// the real cursor takes over without a visible jump.
-#[tauri::command]
-pub fn release_cursor_ghost<R: Runtime>(app: AppHandle<R>, x: f64, y: f64) -> Result<(), String> {
+fn release<R: Runtime>(app: &AppHandle<R>, x: f64, y: f64) -> Result<(), String> {
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
-    let ghost = ghost_window(&app)?;
-    let target = ghost_position(&app, x, y)?;
+    let ghost = ghost_window(app)?;
+    let target = ghost_position(app, x, y)?;
     let scale = ghost.scale_factor().map_err(|e| e.to_string())?;
     let start = ghost
         .outer_position()
         .map_err(|e| e.to_string())?
         .to_logical::<f64>(scale);
     if start.x <= OFFSCREEN / 2.0 {
-        // Nothing parked (e.g. the app launched under the cursor).
-        return Ok(());
+        return Ok(()); // nothing parked
     }
 
     std::thread::spawn(move || {
@@ -124,13 +144,86 @@ pub fn release_cursor_ghost<R: Runtime>(app: AppHandle<R>, x: f64, y: f64) -> Re
     Ok(())
 }
 
-#[tauri::command]
-pub fn hide_cursor_ghost<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+fn hide<R: Runtime>(app: &AppHandle<R>) {
     GENERATION.fetch_add(1, Ordering::SeqCst);
-    match app.get_webview_window(LABEL) {
-        Some(ghost) => ghost
-            .set_position(LogicalPosition::new(OFFSCREEN, OFFSCREEN))
-            .map_err(|e| e.to_string()),
-        None => Ok(()),
+    if let Some(ghost) = app.get_webview_window(LABEL) {
+        let _ = ghost.set_position(LogicalPosition::new(OFFSCREEN, OFFSCREEN));
+    }
+}
+
+/// Cursor position relative to the main window, in logical points, plus the
+/// window's logical size. `None` if the window is hidden or unavailable.
+fn cursor_in_main<R: Runtime>(app: &AppHandle<R>) -> Option<((f64, f64), (f64, f64))> {
+    let main = app.get_webview_window("main")?;
+    if !main.is_visible().unwrap_or(false) {
+        return None;
+    }
+    let scale = main.scale_factor().ok()?;
+    let cursor = app.cursor_position().ok()?;
+    let origin = main.inner_position().ok()?;
+    let size = main.inner_size().ok()?.to_logical::<f64>(scale);
+    let rel = (
+        (cursor.x - origin.x as f64) / scale,
+        (cursor.y - origin.y as f64) / scale,
+    );
+    Some((rel, (size.width, size.height)))
+}
+
+/// Polls the global cursor and parks/releases the arrow on window enter/exit.
+pub fn start_monitor<R: Runtime>(app: AppHandle<R>) {
+    std::thread::spawn(move || {
+        // Last cursor position while inside, for the exit point.
+        let mut inside_at: Option<((f64, f64), (f64, f64))> = None;
+        loop {
+            std::thread::sleep(POLL);
+            let current = if ENABLED.load(Ordering::SeqCst) {
+                cursor_in_main(&app).filter(|((x, y), (w, h))| {
+                    *x >= 0.0 && *y >= 0.0 && *x < *w && *y < *h
+                })
+            } else {
+                None
+            };
+
+            match (inside_at, current) {
+                (None, Some(((x, y), (w, h)))) => {
+                    let (ex, ey) = snap_to_nearest_edge(x, y, w, h);
+                    let _ = park(&app, ex, ey);
+                    let _ = app.emit_to("main", INSIDE_EVENT, true);
+                }
+                (Some(((x, y), (w, h))), None) => {
+                    let (ex, ey) = snap_to_nearest_edge(x, y, w, h);
+                    if ENABLED.load(Ordering::SeqCst) {
+                        let _ = release(&app, ex, ey);
+                    } else {
+                        hide(&app);
+                    }
+                    let _ = app.emit_to("main", INSIDE_EVENT, false);
+                }
+                _ => {}
+            }
+            inside_at = current;
+        }
+    });
+}
+
+/// The page turns tracking on while Pluely's invisible cursor is in use.
+#[tauri::command]
+pub fn set_cursor_ghost_enabled<R: Runtime>(app: AppHandle<R>, enabled: bool) {
+    ENABLED.store(enabled, Ordering::SeqCst);
+    if !enabled {
+        hide(&app);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::snap_to_nearest_edge;
+
+    #[test]
+    fn snaps_to_the_closest_edge() {
+        assert_eq!(snap_to_nearest_edge(3.0, 30.0, 460.0, 54.0), (0.0, 30.0));
+        assert_eq!(snap_to_nearest_edge(457.0, 30.0, 460.0, 54.0), (460.0, 30.0));
+        assert_eq!(snap_to_nearest_edge(200.0, 2.0, 460.0, 54.0), (200.0, 0.0));
+        assert_eq!(snap_to_nearest_edge(200.0, 52.0, 460.0, 54.0), (200.0, 54.0));
     }
 }
