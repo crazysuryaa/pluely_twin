@@ -139,6 +139,17 @@ export const useSystemPrompts = () => {
       const selectedPrompt = prompts.find((p) => p.id === selectedPromptId);
       if (selectedPrompt) {
         setSystemPrompt(selectedPrompt.prompt);
+        // The overlay window only sees changes through localStorage, so edits
+        // to the selected prompt must be written back or it keeps the old text.
+        if (
+          safeLocalStorage.getItem(STORAGE_KEYS.SYSTEM_PROMPT) !==
+          selectedPrompt.prompt
+        ) {
+          safeLocalStorage.setItem(
+            STORAGE_KEYS.SYSTEM_PROMPT,
+            selectedPrompt.prompt
+          );
+        }
       } else {
         // Selected prompt was deleted, reset to default
         setSelectedPromptId(null);
