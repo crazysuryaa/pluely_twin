@@ -9,7 +9,6 @@ class Settings(BaseSettings):
     )
 
     secret_key: str = "development-only-change-me"
-    create_key: str = ""
     public_url: str = "http://localhost:8787"
     session_ttl_seconds: int = 8 * 60 * 60
     max_events: int = 5000

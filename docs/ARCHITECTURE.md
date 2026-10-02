@@ -35,10 +35,17 @@ The preferred production topology is:
 
 ```text
 Host App
-  └── outbound WSS ──► Twin Relay ◄── outbound WSS ── Commenter
+  └── outbound WSS ──► Cloudflare Worker
+                           │
+                           ▼
+                    TwinSession Durable Object
+                           ▲
+  Commenter ─ outbound WSS ┘
 ```
 
-The Host does not expose an inbound public port.
+Each logical Twin session is mapped by name to one SQLite-backed Durable Object.
+That Durable Object is the coordination point for its Host and Commenter
+connections. The Host does not expose an inbound public port.
 
 ### Session creation
 
@@ -46,8 +53,11 @@ The Host calls:
 
 ```text
 POST /api/v1/sessions
-X-Relay-Create-Key: <optional deployment key>
 ```
+
+No permanent client secret is embedded in distributed Host binaries. Cloudflare
+rate-limits session creation, and every successful creation returns fresh,
+role-scoped, short-lived credentials.
 
 The relay returns:
 
@@ -70,14 +80,68 @@ Commenter messages use a caller-generated `comment_id`. The relay keeps them
 pending until the Host sends `comment_received`. Only then does the relay send
 `comment_accepted` to the Commenter. Re-sends are deduplicated.
 
+### Cloudflare persistence and hibernation
+
+The production relay stores the event replay window, pending comments,
+acknowledged comment IDs, session ID and expiry in Durable Object SQLite.
+
+Per-WebSocket role/device/connection metadata is stored using WebSocket
+attachments so it survives Durable Object hibernation. Exact plain-text
+`ping`/`pong` heartbeat frames use Cloudflare WebSocket auto-response and do
+not need to wake an idle session object.
+
 ### Disconnect behavior
 
 - Commenter network interruption: Commenter reconnects with capped exponential backoff and asks for replay.
-- Host network interruption: Commenter remains connected to the relay; comments queue there until Host reconnects.
-- Host presses Stop: Host relay token is used to revoke the relay session immediately and connected Commenters are closed.
-- Relay process restart: current in-memory session state is lost. A production HA version should add Redis/shared state.
+- Host network interruption: Commenter can remain connected to the Durable Object; comments persist until Host reconnects.
+- Durable Object hibernation: WebSockets remain attached at Cloudflare and connection metadata is restored on wake.
+- Host presses Stop: Host relay token revokes the session immediately and connected Commenters are closed.
+- Session expiry: a Durable Object alarm revokes/cleans the session after its configured TTL.
 
-### Deployment constraint
+The FastAPI implementation under `relay/` remains a local/self-hosted reference
+implementation and is not the primary production deployment.
 
-Until shared state is implemented, run exactly one relay instance. Cloud Run
-should use `min-instances=1` and `max-instances=1` for this phase.
+
+## Live screen media
+
+Screen sharing is a separate, read-only media lane from transcript/comment
+traffic.
+
+```text
+Host primary monitor
+   ↓ xcap capture
+JPEG ~5 fps, max 1600×1000
+   ↓
+Host media WSS
+   ↓
+TwinSession Durable Object
+   ↓
+Commenter media WSS
+   ↓
+left-side Live Host Screen pane
+```
+
+Endpoints:
+
+```text
+WS /api/v1/ws/:session/media/host
+WS /api/v1/ws/:session/media/commenter
+```
+
+The media channel reuses the session's role-scoped JWTs but does not share the
+control WebSocket. Binary media frames are never inserted into transcript
+history, replay buffers, prompts, or comment queues.
+
+The Host must explicitly press **Share Primary Screen**. **Stop Screen Share**
+terminates the media task without ending the remote-commenter session.
+
+Current transport properties:
+
+- primary monitor only
+- JPEG frames
+- approximately 5 frames/second
+- maximum encoded source dimensions 1600×1000
+- 2 MB maximum frame size at the relay
+- automatic media reconnect independent of control-channel reconnect
+- read-only on the Commenter side
+- no mouse, keyboard, clipboard, shell, file, or application control

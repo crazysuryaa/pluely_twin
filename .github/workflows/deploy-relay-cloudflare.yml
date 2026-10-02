@@ -1,0 +1,66 @@
+name: Deploy Twin Relay to Cloudflare
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloudflare-relay
+
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TWIN_RELAY_SECRET_KEY: ${{ secrets.TWIN_RELAY_SECRET_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install relay dependencies
+        run: npm install
+
+      - name: Typecheck relay
+        run: npm run typecheck
+
+      - name: Create temporary Worker secrets file
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          required = [
+              "TWIN_RELAY_SECRET_KEY",
+          ]
+          missing = [name for name in required if not os.environ.get(name)]
+          if missing:
+              raise SystemExit(
+                  "Missing GitHub Actions secrets: " + ", ".join(missing)
+              )
+
+          with open(".secrets.production.json", "w", encoding="utf-8") as handle:
+              json.dump(
+                  {
+                      "TWIN_RELAY_SECRET_KEY": os.environ["TWIN_RELAY_SECRET_KEY"],
+                  },
+                  handle,
+              )
+          PY
+
+      - name: Deploy Cloudflare Worker + Durable Object
+        run: npx wrangler deploy --secrets-file .secrets.production.json
+
+      - name: Remove temporary secrets file
+        if: always()
+        run: rm -f .secrets.production.json

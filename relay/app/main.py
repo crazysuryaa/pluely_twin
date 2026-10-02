@@ -61,12 +61,7 @@ async def health() -> dict[str, str]:
 
 
 @app.post("/api/v1/sessions")
-async def create_session(
-    x_relay_create_key: str | None = Header(default=None),
-) -> dict[str, Any]:
-    if settings.create_key and x_relay_create_key != settings.create_key:
-        raise HTTPException(status_code=401, detail="Invalid relay create key")
-
+async def create_session() -> dict[str, Any]:
     session = await manager.create_session(
         ttl_seconds=settings.session_ttl_seconds,
         max_events=settings.max_events,

@@ -70,6 +70,8 @@ export default function App() {
   const [status, setStatus] = useState("Disconnected");
   const [comment, setComment] = useState("");
   const [feed, setFeed] = useState<FeedItem[]>([]);
+  const [screenFrameUrl, setScreenFrameUrl] = useState<string | null>(null);
+  const [screenStatus, setScreenStatus] = useState("Waiting for Host screen share");
 
   const socketRef = useRef<WebSocket | null>(null);
   const connectionConfigRef = useRef<ConnectionConfig | null>(null);
@@ -77,6 +79,11 @@ export default function App() {
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<number | null>(null);
   const heartbeatTimerRef = useRef<number | null>(null);
+  const mediaSocketRef = useRef<WebSocket | null>(null);
+  const mediaReconnectTimerRef = useRef<number | null>(null);
+  const mediaReconnectAttemptRef = useRef(0);
+  const screenFrameUrlRef = useRef<string | null>(null);
+  const lastPongAtRef = useRef(Date.now());
   const lastEventSeqRef = useRef(0);
   const pendingCommentsRef = useRef<Map<string, string>>(new Map());
   const assistantDraftIdRef = useRef<string | null>(null);
@@ -87,6 +94,10 @@ export default function App() {
       manualDisconnectRef.current = true;
       clearReconnectTimer();
       clearHeartbeat();
+      clearMediaReconnectTimer();
+      mediaSocketRef.current?.close();
+      mediaSocketRef.current = null;
+      clearScreenFrame();
       socketRef.current?.close();
       socketRef.current = null;
     };
@@ -104,6 +115,183 @@ export default function App() {
       window.clearInterval(heartbeatTimerRef.current);
       heartbeatTimerRef.current = null;
     }
+  }
+
+  function clearMediaReconnectTimer() {
+    if (mediaReconnectTimerRef.current !== null) {
+      window.clearTimeout(mediaReconnectTimerRef.current);
+      mediaReconnectTimerRef.current = null;
+    }
+  }
+
+  function clearScreenFrame() {
+    const current = screenFrameUrlRef.current;
+    if (current) {
+      URL.revokeObjectURL(current);
+      screenFrameUrlRef.current = null;
+    }
+    setScreenFrameUrl(null);
+  }
+
+  function mediaWebSocketUrl(
+    config: Extract<ConnectionConfig, { mode: "relay" }>
+  ) {
+    return `${relayWsBase(config.relayBaseUrl)}/api/v1/ws/${encodeURIComponent(config.sessionId)}/media/commenter`;
+  }
+
+  function scheduleMediaReconnect(
+    config: Extract<ConnectionConfig, { mode: "relay" }>
+  ) {
+    if (manualDisconnectRef.current) return;
+
+    clearMediaReconnectTimer();
+    const attempt = mediaReconnectAttemptRef.current;
+    const delay = Math.min(1_000 * 2 ** attempt, MAX_RECONNECT_DELAY_MS);
+    mediaReconnectAttemptRef.current = attempt + 1;
+    setScreenStatus(
+      `Screen stream reconnecting in ${Math.ceil(delay / 1000)}s`
+    );
+
+    mediaReconnectTimerRef.current = window.setTimeout(() => {
+      if (!manualDisconnectRef.current) {
+        startMediaSocket(config, true);
+      }
+    }, delay);
+  }
+
+  function startMediaSocket(
+    config: Extract<ConnectionConfig, { mode: "relay" }>,
+    reconnecting = false
+  ) {
+    clearMediaReconnectTimer();
+
+    const existing = mediaSocketRef.current;
+    if (
+      existing &&
+      (existing.readyState === WebSocket.OPEN ||
+        existing.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
+
+    const socket = new WebSocket(mediaWebSocketUrl(config));
+    socket.binaryType = "arraybuffer";
+    mediaSocketRef.current = socket;
+    setScreenStatus(
+      reconnecting ? "Reconnecting screen stream…" : "Connecting screen stream…"
+    );
+
+    socket.onopen = () => {
+      if (mediaSocketRef.current !== socket) return;
+
+      socket.send(
+        JSON.stringify({
+          type: "authenticate",
+          token: config.token,
+          device_name: config.deviceName || null,
+          connection_id: `${clientConnectionIdRef.current}-media`,
+          last_event_seq: 0,
+        })
+      );
+    };
+
+    socket.onmessage = (event) => {
+      if (mediaSocketRef.current !== socket) return;
+
+      if (typeof event.data === "string") {
+        if (event.data === "ping") {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send("pong");
+          }
+          return;
+        }
+
+        if (event.data === "pong") {
+          return;
+        }
+
+        try {
+          const value = JSON.parse(event.data) as {
+            type?: string;
+            state?: string;
+          };
+
+          if (value.type === "authenticated") {
+            mediaReconnectAttemptRef.current = 0;
+            setScreenStatus("Waiting for Host screen share");
+            return;
+          }
+
+          if (value.type === "screen_status") {
+            if (value.state === "started") {
+              setScreenStatus("Host is sharing screen");
+            } else {
+              clearScreenFrame();
+              setScreenStatus("Screen share stopped");
+            }
+            return;
+          }
+
+          if (value.type === "authentication_failed") {
+            setScreenStatus("Screen stream authentication failed");
+            mediaSocketRef.current = null;
+            socket.close();
+          }
+        } catch {
+          // Ignore unknown text messages on the media channel.
+        }
+        return;
+      }
+
+      const bytes =
+        event.data instanceof ArrayBuffer
+          ? event.data
+          : null;
+
+      if (!bytes || bytes.byteLength === 0) return;
+
+      const blob = new Blob([bytes], { type: "image/jpeg" });
+      const nextUrl = URL.createObjectURL(blob);
+      const previousUrl = screenFrameUrlRef.current;
+      screenFrameUrlRef.current = nextUrl;
+      setScreenFrameUrl(nextUrl);
+      setScreenStatus("Live");
+
+      if (previousUrl) {
+        URL.revokeObjectURL(previousUrl);
+      }
+    };
+
+    socket.onerror = () => {
+      if (mediaSocketRef.current !== socket) return;
+      try {
+        socket.close();
+      } catch {
+        scheduleMediaReconnect(config);
+      }
+    };
+
+    socket.onclose = () => {
+      if (mediaSocketRef.current !== socket) return;
+      mediaSocketRef.current = null;
+
+      if (manualDisconnectRef.current) return;
+      scheduleMediaReconnect(config);
+    };
+  }
+
+  function stopMediaSocket() {
+    clearMediaReconnectTimer();
+    const socket = mediaSocketRef.current;
+    mediaSocketRef.current = null;
+    try {
+      socket?.close();
+    } catch {
+      // Best effort.
+    }
+    mediaReconnectAttemptRef.current = 0;
+    clearScreenFrame();
+    setScreenStatus("Waiting for Host screen share");
   }
 
   function appendFeed(
@@ -274,8 +462,13 @@ export default function App() {
     }, delay);
   }
 
-  function startHeartbeat(socket: WebSocket) {
+  function startHeartbeat(
+    socket: WebSocket,
+    config: ConnectionConfig
+  ) {
     clearHeartbeat();
+
+    lastPongAtRef.current = Date.now();
 
     heartbeatTimerRef.current = window.setInterval(() => {
       if (
@@ -285,13 +478,24 @@ export default function App() {
         return;
       }
 
+      if (Date.now() - lastPongAtRef.current > 35_000) {
+        socket.close();
+        return;
+      }
+
       try {
-        socket.send(
-          JSON.stringify({
-            type: "ping",
-            nonce: String(Date.now()),
-          })
-        );
+        if (config.mode === "relay") {
+          // Cloudflare Durable Objects can auto-answer this exact frame
+          // while hibernating, so the session stays cheap and responsive.
+          socket.send("ping");
+        } else {
+          socket.send(
+            JSON.stringify({
+              type: "ping",
+              nonce: String(Date.now()),
+            })
+          );
+        }
       } catch {
         socket.close();
       }
@@ -347,6 +551,19 @@ export default function App() {
     socket.onmessage = (event) => {
       if (socketRef.current !== socket) return;
 
+      lastPongAtRef.current = Date.now();
+
+      if (event.data === "ping") {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send("pong");
+        }
+        return;
+      }
+
+      if (event.data === "pong") {
+        return;
+      }
+
       let message: ServerMessage;
       try {
         message = JSON.parse(event.data) as ServerMessage;
@@ -365,8 +582,11 @@ export default function App() {
             ? "Connected to relay · waiting for Host"
             : "Connected"
         );
-        startHeartbeat(socket);
+        startHeartbeat(socket, config);
         flushPendingComments(socket);
+        if (config.mode === "relay") {
+          startMediaSocket(config);
+        }
         return;
       }
 
@@ -408,6 +628,7 @@ export default function App() {
         setConnected(false);
         setSessionActive(false);
         setStatus("Session expired");
+        stopMediaSocket();
         socket.close();
         return;
       }
@@ -506,6 +727,7 @@ export default function App() {
       reconnectAttemptRef.current = 0;
       clientConnectionIdRef.current = crypto.randomUUID();
       setFeed([]);
+      stopMediaSocket();
       setSessionId("");
       setHostConnected(true);
       openSocket(config, false);
@@ -520,6 +742,7 @@ export default function App() {
     manualDisconnectRef.current = true;
     clearReconnectTimer();
     clearHeartbeat();
+    stopMediaSocket();
 
     const socket = socketRef.current;
     socketRef.current = null;
@@ -567,7 +790,7 @@ export default function App() {
   return (
     <main
       style={{
-        maxWidth: 980,
+        maxWidth: 1440,
         margin: "0 auto",
         padding: 24,
         fontFamily: "sans-serif",
@@ -693,68 +916,210 @@ export default function App() {
             </div>
           ) : null}
 
-          <section style={{ marginTop: 20, minHeight: 360 }}>
-            {feed.length === 0 ? (
-              <div style={{ opacity: 0.6 }}>
-                Waiting for transcript, assistant output, or comments…
-              </div>
-            ) : (
-              feed.map((item) => (
-                <article
-                  key={item.id}
-                  style={{ marginBottom: 14 }}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(0, 1.65fr) minmax(320px, 0.85fr)",
+              gap: 16,
+              marginTop: 20,
+              minHeight: "calc(100vh - 150px)",
+            }}
+          >
+            <section
+              style={{
+                minWidth: 0,
+                border: "1px solid #d8d8d8",
+                borderRadius: 12,
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+                background: "#111",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "10px 12px",
+                  background: "#1b1b1b",
+                  color: "#fff",
+                  borderBottom: "1px solid #333",
+                }}
+              >
+                <strong style={{ fontSize: 13 }}>Live Host Screen</strong>
+                <span
+                  style={{
+                    fontSize: 11,
+                    opacity: 0.7,
+                  }}
                 >
-                  <strong>{item.source}</strong>
-                  {item.status === "pending" ? (
-                    <span
+                  {screenStatus}
+                </span>
+              </div>
+
+              <div
+                id="host-screen-surface"
+                style={{
+                  flex: 1,
+                  minHeight: 520,
+                  display: "grid",
+                  placeItems: "center",
+                  overflow: "hidden",
+                  color: "#d4d4d4",
+                  background:
+                    "radial-gradient(circle at center, #202020 0%, #111 72%)",
+                  textAlign: "center",
+                }}
+              >
+                {screenFrameUrl ? (
+                  <img
+                    src={screenFrameUrl}
+                    alt="Live Host screen"
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "contain",
+                      display: "block",
+                      background: "#000",
+                    }}
+                  />
+                ) : (
+                  <div style={{ maxWidth: 360, padding: 24 }}>
+                    <div
                       style={{
-                        marginLeft: 8,
-                        fontSize: 11,
-                        opacity: 0.6,
+                        fontSize: 18,
+                        fontWeight: 700,
+                        marginBottom: 8,
                       }}
                     >
-                      sending…
-                    </span>
-                  ) : null}
-                  <div
-                    style={{
-                      whiteSpace: "pre-wrap",
-                      marginTop: 3,
-                    }}
-                  >
-                    {item.text}
+                      {screenStatus}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        lineHeight: 1.5,
+                        opacity: 0.72,
+                      }}
+                    >
+                      When the Host starts screen sharing, the primary monitor
+                      appears here automatically.
+                    </div>
                   </div>
-                </article>
-              ))
-            )}
-          </section>
+                )}
+              </div>
+            </section>
 
-          <form
-            onSubmit={sendComment}
-            style={{ display: "grid", gap: 8 }}
-          >
-            <textarea
-              value={comment}
-              onChange={(e) => setComment(e.target.value)}
-              maxLength={2000}
-              rows={3}
-              placeholder={
-                connected
-                  ? hostConnected
-                    ? "Send a comment to the Host…"
-                    : "Host is reconnecting — comment will remain queued…"
-                  : "Connection is recovering — comment will be queued…"
-              }
-            />
-            <button
-              type="submit"
-              disabled={!comment.trim()}
+            <section
+              style={{
+                minWidth: 0,
+                border: "1px solid #d8d8d8",
+                borderRadius: 12,
+                overflow: "hidden",
+                display: "flex",
+                flexDirection: "column",
+                background: "#fff",
+              }}
             >
-              {connected && hostConnected
-                ? "Send comment"
-                : "Queue comment"}
-            </button>
-          </form>
+              <div
+                style={{
+                  padding: "10px 12px",
+                  borderBottom: "1px solid #e6e6e6",
+                  fontWeight: 700,
+                  fontSize: 13,
+                }}
+              >
+                Session Feed
+              </div>
+
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflowY: "auto",
+                  padding: 14,
+                }}
+              >
+                {feed.length === 0 ? (
+                  <div style={{ opacity: 0.6 }}>
+                    Waiting for transcript, assistant output, or comments…
+                  </div>
+                ) : (
+                  feed.map((item) => (
+                    <article
+                      key={item.id}
+                      style={{
+                        marginBottom: 14,
+                        paddingBottom: 12,
+                        borderBottom: "1px solid #f0f0f0",
+                      }}
+                    >
+                      <strong>{item.source}</strong>
+                      {item.status === "pending" ? (
+                        <span
+                          style={{
+                            marginLeft: 8,
+                            fontSize: 11,
+                            opacity: 0.6,
+                          }}
+                        >
+                          sending…
+                        </span>
+                      ) : null}
+                      <div
+                        style={{
+                          whiteSpace: "pre-wrap",
+                          marginTop: 3,
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {item.text}
+                      </div>
+                    </article>
+                  ))
+                )}
+              </div>
+
+              <form
+                onSubmit={sendComment}
+                style={{
+                  display: "grid",
+                  gap: 8,
+                  padding: 12,
+                  borderTop: "1px solid #e6e6e6",
+                  background: "#fafafa",
+                }}
+              >
+                <textarea
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  maxLength={2000}
+                  rows={4}
+                  placeholder={
+                    connected
+                      ? hostConnected
+                        ? "Send a comment to the Host…"
+                        : "Host is reconnecting — comment will remain queued…"
+                      : "Connection is recovering — comment will be queued…"
+                  }
+                  style={{
+                    width: "100%",
+                    resize: "vertical",
+                    boxSizing: "border-box",
+                  }}
+                />
+                <button
+                  type="submit"
+                  disabled={!comment.trim()}
+                >
+                  {connected && hostConnected
+                    ? "Send comment"
+                    : "Queue comment"}
+                </button>
+              </form>
+            </section>
+          </div>
         </>
       )}
     </main>

@@ -1,13 +1,17 @@
 use std::collections::{HashSet, VecDeque};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
+use image::codecs::jpeg::JpegEncoder;
+use image::imageops::FilterType;
+use image::{ColorType, DynamicImage};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::broadcast;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
+use xcap::Monitor;
 
 use super::protocol::{RemoteComment, SequencedHostEvent};
 use super::server::SharedEventHistory;
@@ -172,12 +176,25 @@ pub async fn run_host_relay(
 
         let mut heartbeat =
             tokio::time::interval(Duration::from_secs(10));
+        let mut last_pong = Instant::now();
 
         let disconnected = loop {
             tokio::select! {
                 incoming = source.next() => {
                     match incoming {
                         Some(Ok(Message::Text(text))) => {
+                            if text.as_str() == "ping" {
+                                if sink.send(Message::Text("pong".into())).await.is_err() {
+                                    break true;
+                                }
+                                continue;
+                            }
+
+                            if text.as_str() == "pong" {
+                                last_pong = Instant::now();
+                                continue;
+                            }
+
                             let value: Value = match serde_json::from_str(&text) {
                                 Ok(value) => value,
                                 Err(_) => continue,
@@ -185,6 +202,7 @@ pub async fn run_host_relay(
 
                             match value.get("type").and_then(|item| item.as_str()) {
                                 Some("ping") => {
+                                    last_pong = Instant::now();
                                     if send_json(
                                         &mut sink,
                                         &json!({
@@ -194,6 +212,9 @@ pub async fn run_host_relay(
                                     ).await.is_err() {
                                         break true;
                                     }
+                                }
+                                Some("pong") => {
+                                    last_pong = Instant::now();
                                 }
                                 Some("host_event_accepted") => {
                                     if let Some(seq) = value.get("seq").and_then(Value::as_u64) {
@@ -275,12 +296,18 @@ pub async fn run_host_relay(
                             }
                         }
                         Some(Ok(Message::Ping(payload))) => {
+                            last_pong = Instant::now();
                             if sink.send(Message::Pong(payload)).await.is_err() {
                                 break true;
                             }
                         }
+                        Some(Ok(Message::Pong(_))) => {
+                            last_pong = Instant::now();
+                        }
                         Some(Ok(Message::Close(_))) | None => break true,
-                        Some(Ok(_)) => {}
+                        Some(Ok(_)) => {
+                            last_pong = Instant::now();
+                        }
                         Some(Err(_)) => break true,
                     }
                 }
@@ -312,13 +339,15 @@ pub async fn run_host_relay(
                 }
 
                 _ = heartbeat.tick() => {
-                    if send_json(
-                        &mut sink,
-                        &json!({
-                            "type": "ping",
-                            "nonce": uuid::Uuid::new_v4().to_string(),
-                        }),
-                    ).await.is_err() {
+                    if last_pong.elapsed() > Duration::from_secs(35) {
+                        break true;
+                    }
+
+                    if sink
+                        .send(Message::Text("ping".into()))
+                        .await
+                        .is_err()
+                    {
                         break true;
                     }
                 }
@@ -342,6 +371,202 @@ pub async fn run_host_relay(
 
         tokio::time::sleep(Duration::from_secs(delay)).await;
     }
+}
+
+pub async fn run_host_screen_stream(
+    app: AppHandle,
+    host_ws_url: String,
+    host_token: String,
+) -> Result<(), String> {
+    let media_ws_url = host_ws_url
+        .strip_suffix("/host")
+        .map(|base| format!("{base}/media/host"))
+        .ok_or_else(|| "Invalid Twin relay Host WebSocket URL".to_string())?;
+
+    let frame_interval = Duration::from_millis(200);
+    let mut reconnect_attempt = 0u32;
+
+    loop {
+        let _ = app.emit(
+            "remote-screen-share-status",
+            json!({
+                "status": if reconnect_attempt == 0 { "starting" } else { "reconnecting" },
+                "fps": 5,
+            }),
+        );
+
+        let (ws_stream, _) = match connect_async(&media_ws_url).await {
+            Ok(value) => value,
+            Err(error) => {
+                reconnect_attempt = reconnect_attempt.saturating_add(1);
+                let delay = reconnect_delay_seconds(reconnect_attempt);
+                let _ = app.emit(
+                    "remote-screen-share-status",
+                    json!({
+                        "status": "reconnecting",
+                        "retry_in_seconds": delay,
+                        "error": error.to_string(),
+                    }),
+                );
+                tokio::time::sleep(Duration::from_secs(delay)).await;
+                continue;
+            }
+        };
+
+        let (mut sink, mut source) = ws_stream.split();
+
+        send_json(
+            &mut sink,
+            &json!({
+                "type": "authenticate",
+                "token": host_token,
+                "device_name": "Pluely Twin Host",
+            }),
+        )
+        .await?;
+
+        let authenticated = source
+            .next()
+            .await
+            .ok_or_else(|| "Screen relay closed before authentication".to_string())?
+            .map_err(|e| format!("Screen relay authentication failed: {e}"))?;
+
+        let Message::Text(auth_text) = authenticated else {
+            return Err("Screen relay returned an invalid authentication frame".to_string());
+        };
+
+        let auth_value: Value = serde_json::from_str(&auth_text)
+            .map_err(|e| format!("Invalid screen relay authentication response: {e}"))?;
+
+        if auth_value.get("type").and_then(|item| item.as_str()) != Some("authenticated") {
+            return Err(format!(
+                "Screen relay rejected Host authentication: {auth_value}"
+            ));
+        }
+
+        reconnect_attempt = 0;
+        let _ = app.emit(
+            "remote-screen-share-status",
+            json!({
+                "status": "streaming",
+                "fps": 5,
+            }),
+        );
+
+        let mut ticker = tokio::time::interval(frame_interval);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        let disconnected = loop {
+            tokio::select! {
+                incoming = source.next() => {
+                    match incoming {
+                        Some(Ok(Message::Text(text))) => {
+                            if text.as_str() == "ping" {
+                                if sink.send(Message::Text("pong".into())).await.is_err() {
+                                    break true;
+                                }
+                            } else if text.as_str() != "pong" {
+                                let value: Value = match serde_json::from_str(&text) {
+                                    Ok(value) => value,
+                                    Err(_) => continue,
+                                };
+
+                                if value.get("type").and_then(|item| item.as_str())
+                                    == Some("authentication_failed")
+                                {
+                                    return Err(
+                                        "Screen relay authentication failed".to_string()
+                                    );
+                                }
+                            }
+                        }
+                        Some(Ok(Message::Ping(payload))) => {
+                            if sink.send(Message::Pong(payload)).await.is_err() {
+                                break true;
+                            }
+                        }
+                        Some(Ok(Message::Close(_))) | None => break true,
+                        Some(Ok(_)) => {}
+                        Some(Err(_)) => break true,
+                    }
+                }
+
+                _ = ticker.tick() => {
+                    let frame = tauri::async_runtime::spawn_blocking(
+                        capture_primary_screen_jpeg,
+                    )
+                    .await
+                    .map_err(|e| format!("Screen capture task failed: {e}"))??;
+
+                    if frame.len() > 2_000_000 {
+                        tracing::warn!(
+                            bytes = frame.len(),
+                            "Skipping oversized Twin screen frame"
+                        );
+                        continue;
+                    }
+
+                    if sink
+                        .send(Message::Binary(frame.into()))
+                        .await
+                        .is_err()
+                    {
+                        break true;
+                    }
+                }
+            }
+        };
+
+        if !disconnected {
+            return Ok(());
+        }
+
+        reconnect_attempt = reconnect_attempt.saturating_add(1);
+        let delay = reconnect_delay_seconds(reconnect_attempt);
+        let _ = app.emit(
+            "remote-screen-share-status",
+            json!({
+                "status": "reconnecting",
+                "retry_in_seconds": delay,
+            }),
+        );
+        tokio::time::sleep(Duration::from_secs(delay)).await;
+    }
+}
+
+fn capture_primary_screen_jpeg() -> Result<Vec<u8>, String> {
+    let monitors =
+        Monitor::all().map_err(|e| format!("Failed to enumerate monitors: {e}"))?;
+
+    let monitor = monitors
+        .into_iter()
+        .find(|monitor| monitor.is_primary())
+        .ok_or_else(|| "No primary monitor found".to_string())?;
+
+    let image = monitor
+        .capture_image()
+        .map_err(|e| format!("Failed to capture primary monitor: {e}"))?;
+
+    let source = DynamicImage::ImageRgba8(image);
+    let resized = if source.width() > 1600 || source.height() > 1000 {
+        source.resize(1600, 1000, FilterType::Triangle)
+    } else {
+        source
+    };
+
+    let rgb = resized.to_rgb8();
+    let mut encoded = Vec::with_capacity(256 * 1024);
+
+    JpegEncoder::new_with_quality(&mut encoded, 62)
+        .encode(
+            rgb.as_raw(),
+            rgb.width(),
+            rgb.height(),
+            ColorType::Rgb8.into(),
+        )
+        .map_err(|e| format!("Failed to encode screen frame: {e}"))?;
+
+    Ok(encoded)
 }
 
 fn reconnect_delay_seconds(attempt: u32) -> u64 {

@@ -9,6 +9,7 @@ on:
       - "src-tauri/**"
       - "commenter/**"
       - "relay/**"
+      - "cloudflare-relay/**"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/validate-twin.yml"
@@ -18,6 +19,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: validate-twin-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   validate:
@@ -66,10 +71,27 @@ jobs:
           npm install
           npm run build
 
-      - name: Validate Twin Relay
+      - name: Validate FastAPI reference relay
         working-directory: relay
         run: |
           pip install -r requirements.txt
           python -m compileall app
           python -c "from app.main import app; print(app.title)"
           python -m unittest discover -s tests -v
+
+  validate-cloudflare:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate Cloudflare Worker + Durable Object
+        working-directory: cloudflare-relay
+        run: |
+          npm install
+          npm run check

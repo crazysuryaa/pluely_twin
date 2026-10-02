@@ -5,7 +5,7 @@
   "identifier": "com.pluely.twin.commenter",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://localhost:1422",
     "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "Pluely Twin Commenter",
-        "width": 1000,
-        "height": 760,
+        "width": 1440,
+        "height": 900,
         "resizable": true
       }
     ],
@@ -24,6 +24,13 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all"
+    "targets": "all",
+    "icon": [
+      "../../src-tauri/icons/32x32.png",
+      "../../src-tauri/icons/128x128.png",
+      "../../src-tauri/icons/128x128@2x.png",
+      "../../src-tauri/icons/icon.icns",
+      "../../src-tauri/icons/icon.ico"
+    ]
   }
 }

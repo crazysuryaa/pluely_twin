@@ -5,6 +5,9 @@ import { Button, Input } from "@/components";
 import { CheckIcon, CopyIcon, Globe2Icon, WifiIcon } from "lucide-react";
 
 const RELAY_URL_KEY = "twin-relay-url";
+const DEFAULT_RELAY_URL =
+  import.meta.env.VITE_TWIN_RELAY_URL ||
+  "https://pluely-twin-relay.karta-testing.workers.dev";
 
 type SessionInfo = {
   active: boolean;
@@ -36,18 +39,22 @@ type RelayStatus = {
   error?: string;
 };
 
+type ScreenShareStatus = {
+  status: "stopped" | "starting" | "streaming" | "reconnecting" | "error";
+  retry_in_seconds?: number;
+  error?: string;
+};
+
 export const RemoteCommenter = () => {
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [comments, setComments] = useState<RemoteComment[]>([]);
   const [connections, setConnections] = useState<ConnectionEvent[]>([]);
   const [relayStatus, setRelayStatus] = useState<RelayStatus | null>(null);
+  const [screenShareStatus, setScreenShareStatus] =
+    useState<ScreenShareStatus>({ status: "stopped" });
   const [relayUrl, setRelayUrl] = useState(
-    () =>
-      localStorage.getItem(RELAY_URL_KEY) ||
-      import.meta.env.VITE_TWIN_RELAY_URL ||
-      ""
+    () => localStorage.getItem(RELAY_URL_KEY) || DEFAULT_RELAY_URL
   );
-  const [relayCreateKey, setRelayCreateKey] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [starting, setStarting] = useState<"relay" | "lan" | null>(null);
   const [copied, setCopied] = useState(false);
@@ -57,6 +64,14 @@ export const RemoteCommenter = () => {
     invoke<SessionInfo | null>("get_remote_commenter_status")
       .then(setSession)
       .catch(() => setSession(null));
+
+    invoke<boolean>("get_remote_screen_share_status")
+      .then((active) =>
+        setScreenShareStatus({
+          status: active ? "streaming" : "stopped",
+        })
+      )
+      .catch(() => setScreenShareStatus({ status: "stopped" }));
 
     const stopComment = listen<RemoteComment>("remote-comment", (event) => {
       setComments((current) => [...current.slice(-99), event.payload]);
@@ -103,12 +118,23 @@ export const RemoteCommenter = () => {
       (event) => setRelayStatus(event.payload)
     );
 
+    const stopScreenShare = listen<ScreenShareStatus>(
+      "remote-screen-share-status",
+      (event) => {
+        setScreenShareStatus(event.payload);
+        if (event.payload.status === "error" && event.payload.error) {
+          setError(event.payload.error);
+        }
+      }
+    );
+
     return () => {
       void stopComment.then((fn) => fn());
       void stopStatus.then((fn) => fn());
       void stopConnected.then((fn) => fn());
       void stopDisconnected.then((fn) => fn());
       void stopRelay.then((fn) => fn());
+      void stopScreenShare.then((fn) => fn());
     };
   }, []);
 
@@ -133,15 +159,41 @@ export const RemoteCommenter = () => {
         "start_remote_commenter_relay",
         {
           relayBaseUrl: normalizedRelayUrl,
-          createKey: relayCreateKey.trim() || null,
         }
       );
+
       setSession(next);
     } catch (e) {
       setRelayStatus(null);
       setError(String(e));
     } finally {
       setStarting(null);
+    }
+  };
+
+  const startScreenShare = async () => {
+    setError(null);
+    setScreenShareStatus({ status: "starting" });
+
+    try {
+      await invoke("start_remote_screen_share");
+    } catch (e) {
+      setScreenShareStatus({
+        status: "error",
+        error: String(e),
+      });
+      setError(String(e));
+    }
+  };
+
+  const stopScreenShare = async () => {
+    setError(null);
+
+    try {
+      await invoke("stop_remote_screen_share");
+      setScreenShareStatus({ status: "stopped" });
+    } catch (e) {
+      setError(String(e));
     }
   };
 
@@ -170,6 +222,7 @@ export const RemoteCommenter = () => {
       setSession(null);
       setConnections([]);
       setRelayStatus(null);
+      setScreenShareStatus({ status: "stopped" });
     } catch (e) {
       setError(String(e));
     }
@@ -241,31 +294,17 @@ export const RemoteCommenter = () => {
             className="text-xs text-muted-foreground hover:text-foreground"
             onClick={() => setShowAdvanced((value) => !value)}
           >
-            {showAdvanced ? "Hide connection settings" : "Connection settings"}
+            {showAdvanced ? "Hide advanced settings" : "Advanced connection settings"}
           </button>
 
           {showAdvanced ? (
             <div className="rounded-md border border-border/60 bg-muted/20 p-3 space-y-3">
               <label className="space-y-1 block">
-                <span className="text-xs font-medium">Twin Relay URL</span>
+                <span className="text-xs font-medium">Twin Relay URL override</span>
                 <Input
                   value={relayUrl}
                   onChange={(event) => setRelayUrl(event.target.value)}
-                  placeholder="https://your-twin-relay.run.app"
-                />
-              </label>
-
-              <label className="space-y-1 block">
-                <span className="text-xs font-medium">
-                  Relay create key
-                </span>
-                <Input
-                  type="password"
-                  value={relayCreateKey}
-                  onChange={(event) =>
-                    setRelayCreateKey(event.target.value)
-                  }
-                  placeholder="Optional if your relay does not require one"
+                  placeholder="https://your-relay.workers.dev"
                 />
               </label>
 
@@ -282,7 +321,7 @@ export const RemoteCommenter = () => {
                 </Button>
                 <p className="text-[10px] text-muted-foreground mt-2">
                   LAN mode is a local fallback and requires both devices to be
-                  reachable on the same network.
+                  reachable on the same network. Worldwide mode needs no user setup.
                 </p>
               </div>
             </div>
@@ -303,21 +342,61 @@ export const RemoteCommenter = () => {
                   ? `${connections.length} commenter${connections.length === 1 ? "" : "s"} connected`
                   : "Waiting for commenter"}
               </div>
+              {session.mode === "relay" ? (
+                <div className="text-[10px] text-muted-foreground mt-0.5">
+                  Screen share:{" "}
+                  {screenShareStatus.status === "streaming"
+                    ? "live"
+                    : screenShareStatus.status === "reconnecting"
+                      ? "reconnecting"
+                      : screenShareStatus.status === "starting"
+                        ? "starting"
+                        : screenShareStatus.status === "error"
+                          ? "error"
+                          : "off"}
+                </div>
+              ) : null}
             </div>
 
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={copyConnectionLink}
-              className="gap-1.5"
-            >
-              {copied ? (
-                <CheckIcon className="h-3.5 w-3.5" />
-              ) : (
-                <CopyIcon className="h-3.5 w-3.5" />
-              )}
-              {copied ? "Copied" : "Copy Connection Link"}
-            </Button>
+            <div className="flex items-center gap-2">
+              {session.mode === "relay" ? (
+                screenShareStatus.status === "streaming" ||
+                screenShareStatus.status === "reconnecting" ? (
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={stopScreenShare}
+                  >
+                    Stop Screen Share
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={startScreenShare}
+                    disabled={screenShareStatus.status === "starting"}
+                  >
+                    {screenShareStatus.status === "starting"
+                      ? "Starting Screen Share…"
+                      : "Share Primary Screen"}
+                  </Button>
+                )
+              ) : null}
+
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={copyConnectionLink}
+                className="gap-1.5"
+              >
+                {copied ? (
+                  <CheckIcon className="h-3.5 w-3.5" />
+                ) : (
+                  <CopyIcon className="h-3.5 w-3.5" />
+                )}
+                {copied ? "Copied" : "Copy Connection Link"}
+              </Button>
+            </div>
           </div>
 
           <div className="text-[10px] text-muted-foreground break-all">
