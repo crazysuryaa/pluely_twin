@@ -44,7 +44,11 @@
       "icons/icon.ico"
     ],
     "resources": ["info.plist", "pluely.desktop"],
-    "macOS": { "minimumSystemVersion": "10.13" }
+    "macOS": {
+      "minimumSystemVersion": "10.13",
+      "signingIdentity": "Developer ID Application: SURYA KIRAN CHERUPALLY (PY9Y5T97N8)",
+      "entitlements": "entitlements.plist"
+    }
   },
   "plugins": {
     "sql": {

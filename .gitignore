@@ -12,6 +12,22 @@ dist
 dist-ssr
 *.local
 
+# Rust build output and generated Tauri schemas, including companion apps
+target/
+**/src-tauri/gen/schemas/
+
+# Local configuration and signing credentials
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.p12
+*.pfx
+*.p8
+*.key
+*.csr
+*.certSigningRequest
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
