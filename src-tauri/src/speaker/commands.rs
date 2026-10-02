@@ -424,6 +424,30 @@ fn normalize_audio_level(samples: &[f32], target_rms: f32) -> Vec<f32> {
         .collect()
 }
 
+// Speech-to-text models work at 16 kHz; sending more only makes the upload
+// (and the base64 IPC hop) ~3x larger at 48 kHz for no accuracy gain.
+const STT_SAMPLE_RATE: u32 = 16_000;
+
+/// Box-filter decimation: each output sample averages the input samples it
+/// covers, which also low-passes enough to avoid audible aliasing in speech.
+fn downsample_for_stt(sample_rate: u32, input: &[f32]) -> (u32, Vec<f32>) {
+    if sample_rate <= STT_SAMPLE_RATE {
+        return (sample_rate, input.to_vec());
+    }
+    let ratio = sample_rate as f64 / STT_SAMPLE_RATE as f64;
+    let out_len = (input.len() as f64 / ratio) as usize;
+    let mut out = Vec::with_capacity(out_len);
+    for i in 0..out_len {
+        let start = (i as f64 * ratio) as usize;
+        let end = (((i + 1) as f64 * ratio) as usize)
+            .min(input.len())
+            .max(start + 1);
+        let sum: f32 = input[start..end].iter().sum();
+        out.push(sum / (end - start) as f32);
+    }
+    (STT_SAMPLE_RATE, out)
+}
+
 // Convert samples to WAV base64 (with proper error handling)
 fn samples_to_wav_b64(sample_rate: u32, mono_f32: &[f32]) -> Result<String, String> {
     // Validate sample rate
@@ -439,6 +463,9 @@ fn samples_to_wav_b64(sample_rate: u32, mono_f32: &[f32]) -> Result<String, Stri
     if mono_f32.is_empty() {
         return Err("Empty audio buffer".to_string());
     }
+
+    let (sample_rate, mono_f32) = downsample_for_stt(sample_rate, mono_f32);
+    let mono_f32 = mono_f32.as_slice();
 
     let mut cursor = Cursor::new(Vec::new());
     let spec = WavSpec {
@@ -629,4 +656,33 @@ pub fn get_output_devices() -> Result<Vec<AudioDevice>, String> {
         error!("Failed to get output devices: {}", e);
         format!("Failed to get output devices: {}", e)
     })
+}
+
+#[cfg(test)]
+mod downsample_tests {
+    use super::*;
+
+    #[test]
+    fn leaves_16k_and_lower_untouched() {
+        let input = vec![0.1, 0.2, 0.3];
+        assert_eq!(downsample_for_stt(16_000, &input), (16_000, input.clone()));
+    }
+
+    #[test]
+    fn decimates_48k_by_averaging_and_keeps_duration() {
+        let input: Vec<f32> = (0..48_000).map(|i| (i % 3) as f32).collect();
+        let (sr, out) = downsample_for_stt(48_000, &input);
+        assert_eq!(sr, 16_000);
+        assert_eq!(out.len(), 16_000); // 1s in, 1s out
+        assert!(out.iter().all(|&v| (v - 1.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn handles_non_integer_ratio() {
+        let input = vec![0.5; 44_100];
+        let (sr, out) = downsample_for_stt(44_100, &input);
+        assert_eq!(sr, 16_000);
+        assert_eq!(out.len(), 16_000);
+        assert!(out.iter().all(|&v| (v - 0.5).abs() < 1e-6));
+    }
 }

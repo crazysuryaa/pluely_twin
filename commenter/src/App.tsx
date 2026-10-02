@@ -52,6 +52,7 @@ type ServerMessage =
 const SAVED_LINK_KEY = "pluely-twin:last-connection-link";
 const DEVICE_NAME_KEY = "pluely-twin:device-name";
 const MAX_RECONNECT_DELAY_MS = 8_000;
+const MEDIA_STALL_TIMEOUT_MS = 8_000;
 
 export default function App() {
   const [connectionLink, setConnectionLink] = useState(
@@ -82,6 +83,8 @@ export default function App() {
   const mediaSocketRef = useRef<WebSocket | null>(null);
   const mediaReconnectTimerRef = useRef<number | null>(null);
   const mediaReconnectAttemptRef = useRef(0);
+  const mediaWatchdogRef = useRef<number | null>(null);
+  const lastFrameAtRef = useRef(0);
   const screenFrameUrlRef = useRef<string | null>(null);
   const lastPongAtRef = useRef(Date.now());
   const lastEventSeqRef = useRef(0);
@@ -95,6 +98,7 @@ export default function App() {
       clearReconnectTimer();
       clearHeartbeat();
       clearMediaReconnectTimer();
+      clearMediaWatchdog();
       mediaSocketRef.current?.close();
       mediaSocketRef.current = null;
       clearScreenFrame();
@@ -177,6 +181,20 @@ export default function App() {
     const socket = new WebSocket(mediaWebSocketUrl(config));
     socket.binaryType = "arraybuffer";
     mediaSocketRef.current = socket;
+
+    // While the Host is sharing it resends a frame at least every 2s, so a
+    // long silence means a dead connection the browser hasn't noticed.
+    lastFrameAtRef.current = 0;
+    clearMediaWatchdog();
+    mediaWatchdogRef.current = window.setInterval(() => {
+      if (mediaSocketRef.current !== socket) return;
+      if (
+        lastFrameAtRef.current > 0 &&
+        Date.now() - lastFrameAtRef.current > MEDIA_STALL_TIMEOUT_MS
+      ) {
+        socket.close();
+      }
+    }, 2_000);
     setScreenStatus(
       reconnecting ? "Reconnecting screen stream…" : "Connecting screen stream…"
     );
@@ -226,6 +244,7 @@ export default function App() {
             if (value.state === "started") {
               setScreenStatus("Host is sharing screen");
             } else {
+              lastFrameAtRef.current = 0;
               clearScreenFrame();
               setScreenStatus("Screen share stopped");
             }
@@ -249,6 +268,12 @@ export default function App() {
           : null;
 
       if (!bytes || bytes.byteLength === 0) return;
+
+      // Tell the relay we can take another frame (per-viewer flow control).
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send("frame_ack");
+      }
+      lastFrameAtRef.current = Date.now();
 
       const blob = new Blob([bytes], { type: "image/jpeg" });
       const nextUrl = URL.createObjectURL(blob);
@@ -274,14 +299,23 @@ export default function App() {
     socket.onclose = () => {
       if (mediaSocketRef.current !== socket) return;
       mediaSocketRef.current = null;
+      clearMediaWatchdog();
 
       if (manualDisconnectRef.current) return;
       scheduleMediaReconnect(config);
     };
   }
 
+  function clearMediaWatchdog() {
+    if (mediaWatchdogRef.current !== null) {
+      window.clearInterval(mediaWatchdogRef.current);
+      mediaWatchdogRef.current = null;
+    }
+  }
+
   function stopMediaSocket() {
     clearMediaReconnectTimer();
+    clearMediaWatchdog();
     const socket = mediaSocketRef.current;
     mediaSocketRef.current = null;
     try {
@@ -767,8 +801,10 @@ export default function App() {
   function sendComment(event: FormEvent) {
     event.preventDefault();
 
-    const text = comment.trim();
-    if (!text || !sessionActive) return;
+    // Drop surrounding blank lines only; keep the first line's indentation
+    // so pasted code arrives with its spacing intact.
+    const text = comment.replace(/^\s*\n/, "").trimEnd();
+    if (!text.trim() || !sessionActive) return;
 
     const commentId = crypto.randomUUID();
     pendingCommentsRef.current.set(commentId, text);

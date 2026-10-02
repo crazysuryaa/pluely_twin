@@ -108,9 +108,7 @@ pub async fn start_remote_commenter(
         .map_err(|e| format!("Failed to start remote commenter on port {port}: {e}"))?;
 
     let host = discover_lan_host();
-    let connection_url = format!(
-        "pluely-twin://connect?host={host}&port={port}&token={token}"
-    );
+    let connection_url = format!("pluely-twin://connect?host={host}&port={port}&token={token}");
 
     let (tx, history) = new_event_state();
     let dedupe: server::SharedCommentDedupe =
@@ -182,11 +180,7 @@ pub async fn start_remote_commenter_relay(
         return Err("Twin relay URL is required".to_string());
     }
 
-    let relay_session = relay::create_relay_session(
-        &relay_base_url,
-        None,
-    )
-    .await?;
+    let relay_session = relay::create_relay_session(&relay_base_url, None).await?;
 
     let (tx, history) = new_event_state();
 
@@ -207,13 +201,8 @@ pub async fn start_remote_commenter_relay(
     let outbound_rx = tx.subscribe();
 
     let task = tokio::spawn(async move {
-        if let Err(error) = relay::run_host_relay(
-            app_for_task,
-            relay_for_task,
-            outbound_rx,
-            history_for_task,
-        )
-        .await
+        if let Err(error) =
+            relay::run_host_relay(app_for_task, relay_for_task, outbound_rx, history_for_task).await
         {
             tracing::error!(%error, "Twin relay host client stopped");
         }
@@ -272,8 +261,7 @@ pub async fn start_remote_screen_share(
 
         if session.mode != "relay" {
             return Err(
-                "Live screen streaming currently requires Worldwide relay mode."
-                    .to_string(),
+                "Live screen streaming currently requires Worldwide relay mode.".to_string(),
             );
         }
 
@@ -285,12 +273,9 @@ pub async fn start_remote_screen_share(
 
     let app_for_task = app.clone();
     let task = tokio::spawn(async move {
-        if let Err(error) = relay::run_host_screen_stream(
-            app_for_task.clone(),
-            media.host_ws_url,
-            media.host_token,
-        )
-        .await
+        if let Err(error) =
+            relay::run_host_screen_stream(app_for_task.clone(), media.host_ws_url, media.host_token)
+                .await
         {
             tracing::error!(%error, "Twin screen stream stopped");
             let _ = app_for_task.emit(
@@ -338,9 +323,7 @@ pub fn stop_remote_screen_share(
 }
 
 #[tauri::command]
-pub fn get_remote_screen_share_status(
-    state: State<'_, RemoteState>,
-) -> Result<bool, String> {
+pub fn get_remote_screen_share_status(state: State<'_, RemoteState>) -> Result<bool, String> {
     let inner = state
         .inner
         .lock()
@@ -392,12 +375,9 @@ pub async fn stop_remote_commenter(
     );
 
     if let Some(close) = relay_close {
-        if let Err(error) = relay::close_relay_session(
-            &close.relay_base_url,
-            &close.session_id,
-            &close.host_token,
-        )
-        .await
+        if let Err(error) =
+            relay::close_relay_session(&close.relay_base_url, &close.session_id, &close.host_token)
+                .await
         {
             tracing::warn!(%error, "Failed to revoke Twin relay session");
         }
@@ -424,10 +404,7 @@ pub fn get_remote_commenter_status(
 }
 
 #[tauri::command]
-pub fn publish_host_event(
-    state: State<'_, RemoteState>,
-    event: HostEvent,
-) -> Result<(), String> {
+pub fn publish_host_event(state: State<'_, RemoteState>, event: HostEvent) -> Result<(), String> {
     let mut inner = state
         .inner
         .lock()

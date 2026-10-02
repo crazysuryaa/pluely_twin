@@ -41,7 +41,7 @@ describe("session lifecycle", () => {
     expect(screen.getByRole("textbox", {name:"Ask Pluely"})).toBeTruthy();
 
     // Clicking global settings does NOT collapse
-    fireEvent.click(screen.getByRole("button", {name:"Global settings"}));
+    fireEvent.click(screen.getByRole("button", {name:"Profile and settings"}));
     expect(screen.getByRole("textbox", {name:"Ask Pluely"})).toBeTruthy();
   });
 

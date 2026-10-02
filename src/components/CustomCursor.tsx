@@ -1,5 +1,21 @@
 import { useEffect, useRef } from "react";
 import { MousePointer2 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+
+/** Snap an entry point onto the nearest window edge (where the cursor crossed in). */
+export const snapToNearestEdge = (
+  x: number,
+  y: number,
+  width: number,
+  height: number
+): { x: number; y: number } => {
+  const distances = [x, width - x, y, height - y];
+  const nearest = distances.indexOf(Math.min(...distances));
+  if (nearest === 0) return { x: 0, y };
+  if (nearest === 1) return { x: width, y };
+  if (nearest === 2) return { x, y: 0 };
+  return { x, y: height };
+};
 
 export const CustomCursor = () => {
   const cursorRef = useRef<HTMLDivElement>(null);
@@ -41,6 +57,32 @@ export const CustomCursor = () => {
       }
     };
 
+    // Park a capturable arrow where the real cursor entered, so screen-share
+    // viewers see it stop at the window edge rather than disappear.
+    const handleMouseOver = (e: MouseEvent) => {
+      if (e.relatedTarget) return; // moved between elements, not into the window
+      const point = snapToNearestEdge(
+        e.clientX,
+        e.clientY,
+        window.innerWidth,
+        window.innerHeight
+      );
+      void invoke("show_cursor_ghost", point).catch(console.error);
+    };
+
+    // On exit, glide the parked arrow to where the cursor left so viewers see
+    // it travel there instead of jumping.
+    const handleMouseOut = (e: MouseEvent) => {
+      if (e.relatedTarget) return;
+      const point = snapToNearestEdge(
+        e.clientX,
+        e.clientY,
+        window.innerWidth,
+        window.innerHeight
+      );
+      void invoke("release_cursor_ghost", point).catch(console.error);
+    };
+
     // Start the animation loop
     rafId = requestAnimationFrame(updateCursorPosition);
 
@@ -48,8 +90,13 @@ export const CustomCursor = () => {
     document.addEventListener("mousemove", handleMouseMove, { passive: true });
     document.addEventListener("mouseleave", handleMouseLeave);
     window.addEventListener("blur", handleWindowBlur);
+    document.addEventListener("mouseover", handleMouseOver);
+    document.addEventListener("mouseout", handleMouseOut);
 
     return () => {
+      document.removeEventListener("mouseover", handleMouseOver);
+      document.removeEventListener("mouseout", handleMouseOut);
+      void invoke("hide_cursor_ghost").catch(console.error);
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseleave", handleMouseLeave);
       window.removeEventListener("blur", handleWindowBlur);

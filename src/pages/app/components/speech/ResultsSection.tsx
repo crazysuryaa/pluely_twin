@@ -1,5 +1,5 @@
 import { ChatConversation } from "@/types";
-import { Markdown, Switch, CopyButton } from "@/components";
+import { Markdown, Switch, CopyButton, VerbatimText } from "@/components";
 import { BotIcon, HeadphonesIcon, Loader2, MessageSquareIcon, SparklesIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -118,9 +118,7 @@ export const ResultsSection = ({
                     </div>
                     <CopyButton content={comment.text} />
                   </div>
-                  <div className="prose prose-sm max-w-none w-full dark:prose-invert text-sm leading-relaxed text-[#e2e4e7]">
-                    <Markdown>{comment.text}</Markdown>
-                  </div>
+                  <VerbatimText text={comment.text} />
                 </div>
               ))}
             </div>
@@ -190,9 +188,7 @@ export const ResultsSection = ({
                     </div>
                     <CopyButton content={comment.text} />
                   </div>
-                  <div className="prose prose-sm max-w-none w-full dark:prose-invert text-sm">
-                    <Markdown>{comment.text}</Markdown>
-                  </div>
+                  <VerbatimText text={comment.text} />
                 </div>
               ))}
             </div>

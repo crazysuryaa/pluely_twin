@@ -5,6 +5,7 @@ import {
   ScrollArea,
   Markdown,
   CopyButton,
+  VerbatimText,
 } from "@/components";
 import {
   AlertCircleIcon,
@@ -25,7 +26,7 @@ import { SettingsPanel } from "./SettingsPanel";
 import { PermissionFlow } from "./PermissionFlow";
 // import { QuickActions } from "./QuickActions";
 import { Warning } from "./Warning";
-import { useSystemAudioType } from "@/hooks";
+import { useSystemAudioType, useSystemPrompts } from "@/hooks";
 // import { useApp } from "@/contexts";
 import { MAX_FILES } from "@/config";
 import { LiveWorkspace } from "./LiveWorkspace";
@@ -44,6 +45,12 @@ export const SystemAudio = (
     onCloseSettings?: () => void;
   }
 ) => {
+  // Mounted with the session so a saved prompt is always selected for it.
+  const {
+    prompts: savedPrompts,
+    selectedPromptId,
+    handleSelectPrompt,
+  } = useSystemPrompts();
   const {
     isProcessing,
     isHearingSpeech,
@@ -52,6 +59,8 @@ export const SystemAudio = (
     lastAIResponse,
     pendingManualQuestion,
     submitPendingQuestion,
+    deleteMessage,
+    discardPendingSpeech,
     attachedScreenshots,
     // addScreenshot,
     removeScreenshot,
@@ -61,8 +70,6 @@ export const SystemAudio = (
     startCapture,
     useSystemPrompt,
     setUseSystemPrompt,
-    contextContent,
-    setContextContent,
     // startNewConversation,
     conversation,
     // quickActions,
@@ -225,6 +232,8 @@ export const SystemAudio = (
               selectedMessageId={selectedMessageId}
               onSelectMessage={(id) => setSelectedMessageId(id)}
               onMinimize={() => setIsFullScreen(true)}
+              onDeleteEntry={deleteMessage}
+              onDiscardPending={discardPendingSpeech}
             />
           </div>
           {!setupRequired ? (
@@ -349,8 +358,9 @@ export const SystemAudio = (
                     onUpdateVadConfig={updateVadConfiguration}
                     useSystemPrompt={useSystemPrompt}
                     setUseSystemPrompt={setUseSystemPrompt}
-                    contextContent={contextContent}
-                    setContextContent={setContextContent}
+                    savedPrompts={savedPrompts}
+                    selectedPromptId={selectedPromptId}
+                    onSelectPrompt={handleSelectPrompt}
                   />
                   <Warning isVadMode={isVadMode} />
                 </div>
@@ -424,9 +434,7 @@ export const SystemAudio = (
                         </div>
                         <CopyButton content={selectedComment.text} />
                       </div>
-                      <div className="prose prose-sm max-w-none dark:prose-invert text-sm leading-relaxed text-[#e2e4e7]">
-                        <Markdown>{selectedComment.text}</Markdown>
-                      </div>
+                      <VerbatimText text={selectedComment.text} />
                     </div>
                   )}
                 </div>
@@ -505,9 +513,7 @@ export const SystemAudio = (
                                     </div>
                                     <CopyButton content={comment.text} />
                                   </div>
-                                  <div className="prose prose-sm max-w-none w-full dark:prose-invert text-sm leading-relaxed text-[#e2e4e7]">
-                                    <Markdown>{comment.text}</Markdown>
-                                  </div>
+                                  <VerbatimText text={comment.text} />
                                 </div>
                               ))}
                             </div>

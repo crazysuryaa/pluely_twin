@@ -3,7 +3,6 @@ use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
 use image::codecs::jpeg::JpegEncoder;
-use image::imageops::FilterType;
 use image::{ColorType, DynamicImage};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -34,10 +33,7 @@ pub async fn create_relay_session(
     relay_base_url: &str,
     create_key: Option<&str>,
 ) -> Result<RelayCreateResponse, String> {
-    let url = format!(
-        "{}/api/v1/sessions",
-        relay_base_url.trim_end_matches('/')
-    );
+    let url = format!("{}/api/v1/sessions", relay_base_url.trim_end_matches('/'));
 
     let client = Client::new();
     let mut request = client.post(url);
@@ -54,7 +50,9 @@ pub async fn create_relay_session(
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        return Err(format!("Twin relay session creation failed ({status}): {body}"));
+        return Err(format!(
+            "Twin relay session creation failed ({status}): {body}"
+        ));
     }
 
     response
@@ -167,15 +165,9 @@ pub async fn run_host_relay(
             }),
         );
 
-        replay_after(
-            &mut sink,
-            &history,
-            last_acked_seq,
-        )
-        .await?;
+        replay_after(&mut sink, &history, last_acked_seq).await?;
 
-        let mut heartbeat =
-            tokio::time::interval(Duration::from_secs(10));
+        let mut heartbeat = tokio::time::interval(Duration::from_secs(10));
         let mut last_pong = Instant::now();
 
         let disconnected = loop {
@@ -382,6 +374,16 @@ pub async fn run_host_relay(
     }
 }
 
+const SCREEN_FPS: u64 = 10;
+const SCREEN_MAX_WIDTH: u32 = 1440;
+const SCREEN_MAX_HEIGHT: u32 = 900;
+const SCREEN_JPEG_QUALITY: u8 = 60;
+const SCREEN_MAX_FRAME_BYTES: usize = 2_000_000;
+// Resend an unchanged screen periodically so late-joining or reconnected
+// viewers get a picture, and so dead sockets are noticed.
+const SCREEN_KEYFRAME_INTERVAL: Duration = Duration::from_secs(2);
+const SCREEN_SEND_TIMEOUT: Duration = Duration::from_secs(10);
+
 pub async fn run_host_screen_stream(
     app: AppHandle,
     host_ws_url: String,
@@ -392,7 +394,13 @@ pub async fn run_host_screen_stream(
         .map(|base| format!("{base}/media/host"))
         .ok_or_else(|| "Invalid Twin relay Host WebSocket URL".to_string())?;
 
-    let frame_interval = Duration::from_millis(200);
+    // Capture runs on its own thread and only publishes the latest frame, so a
+    // slow network never queues stale frames and never stalls capture. The
+    // thread exits once this task (and its receiver) is dropped.
+    let (frame_tx, mut frame_rx) = tokio::sync::watch::channel(Vec::<u8>::new());
+    let capture_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || run_screen_capture_loop(capture_app, frame_tx));
+
     let mut reconnect_attempt = 0u32;
 
     loop {
@@ -400,7 +408,7 @@ pub async fn run_host_screen_stream(
             "remote-screen-share-status",
             json!({
                 "status": if reconnect_attempt == 0 { "starting" } else { "reconnecting" },
-                "fps": 5,
+                "fps": SCREEN_FPS,
             }),
         );
 
@@ -458,12 +466,12 @@ pub async fn run_host_screen_stream(
             "remote-screen-share-status",
             json!({
                 "status": "streaming",
-                "fps": 5,
+                "fps": SCREEN_FPS,
             }),
         );
 
-        let mut ticker = tokio::time::interval(frame_interval);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        // Send the latest frame right away after (re)connecting.
+        frame_rx.mark_changed();
 
         let disconnected = loop {
             tokio::select! {
@@ -500,27 +508,26 @@ pub async fn run_host_screen_stream(
                     }
                 }
 
-                _ = ticker.tick() => {
-                    let frame = tauri::async_runtime::spawn_blocking(
-                        capture_primary_screen_jpeg,
-                    )
-                    .await
-                    .map_err(|e| format!("Screen capture task failed: {e}"))??;
+                changed = frame_rx.changed() => {
+                    if changed.is_err() {
+                        return Err("Screen capture stopped unexpectedly".to_string());
+                    }
 
-                    if frame.len() > 2_000_000 {
-                        tracing::warn!(
-                            bytes = frame.len(),
-                            "Skipping oversized Twin screen frame"
-                        );
+                    let frame = frame_rx.borrow_and_update().clone();
+                    if frame.is_empty() {
                         continue;
                     }
 
-                    if sink
-                        .send(Message::Binary(frame.into()))
-                        .await
-                        .is_err()
+                    // A stalled connection blocks here instead of erroring, so
+                    // bound it and reconnect rather than freezing silently.
+                    match tokio::time::timeout(
+                        SCREEN_SEND_TIMEOUT,
+                        sink.send(Message::Binary(frame.into())),
+                    )
+                    .await
                     {
-                        break true;
+                        Ok(Ok(())) => {}
+                        _ => break true,
                     }
                 }
             }
@@ -543,30 +550,102 @@ pub async fn run_host_screen_stream(
     }
 }
 
-fn capture_primary_screen_jpeg() -> Result<Vec<u8>, String> {
-    let monitors =
-        Monitor::all().map_err(|e| format!("Failed to enumerate monitors: {e}"))?;
+fn run_screen_capture_loop(app: AppHandle, frame_tx: tokio::sync::watch::Sender<Vec<u8>>) {
+    let frame_interval = Duration::from_millis(1000 / SCREEN_FPS);
+    let mut monitor: Option<Monitor> = None;
+    let mut previous_raw: Vec<u8> = Vec::new();
+    let mut last_published: Option<Instant> = None;
+    let mut failing = false;
 
-    let monitor = monitors
+    while !frame_tx.is_closed() {
+        let started = Instant::now();
+
+        let result = (|| -> Result<Option<Vec<u8>>, String> {
+            if monitor.is_none() {
+                monitor = Some(primary_monitor()?);
+            }
+            let image = monitor
+                .as_ref()
+                .expect("monitor was just set")
+                .capture_image()
+                .map_err(|e| format!("Failed to capture primary monitor: {e}"))?;
+
+            let unchanged = image.as_raw().as_slice() == previous_raw.as_slice();
+            let keyframe_due =
+                last_published.map_or(true, |at| at.elapsed() >= SCREEN_KEYFRAME_INTERVAL);
+            if unchanged && !keyframe_due {
+                return Ok(None);
+            }
+
+            let encoded = encode_screen_frame(&image)?;
+            previous_raw = image.into_raw();
+            Ok(Some(encoded))
+        })();
+
+        match result {
+            Ok(Some(frame)) => {
+                if failing {
+                    failing = false;
+                    let _ = app.emit(
+                        "remote-screen-share-status",
+                        json!({ "status": "streaming", "fps": SCREEN_FPS }),
+                    );
+                }
+                last_published = Some(Instant::now());
+                if frame.len() > SCREEN_MAX_FRAME_BYTES {
+                    tracing::warn!(bytes = frame.len(), "Skipping oversized Twin screen frame");
+                } else {
+                    frame_tx.send_replace(frame);
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                // Display sleep, monitor changes, or a revoked permission:
+                // report it, re-enumerate monitors, and keep retrying.
+                monitor = None;
+                if !failing {
+                    failing = true;
+                    tracing::warn!(%error, "Twin screen capture failed");
+                    let _ = app.emit(
+                        "remote-screen-share-status",
+                        json!({ "status": "error", "error": error }),
+                    );
+                }
+                std::thread::sleep(Duration::from_secs(1));
+                continue;
+            }
+        }
+
+        std::thread::sleep(frame_interval.saturating_sub(started.elapsed()));
+    }
+}
+
+fn primary_monitor() -> Result<Monitor, String> {
+    Monitor::all()
+        .map_err(|e| format!("Failed to enumerate monitors: {e}"))?
         .into_iter()
         .find(|monitor| monitor.is_primary())
-        .ok_or_else(|| "No primary monitor found".to_string())?;
+        .ok_or_else(|| "No primary monitor found".to_string())
+}
 
-    let image = monitor
-        .capture_image()
-        .map_err(|e| format!("Failed to capture primary monitor: {e}"))?;
-
-    let source = DynamicImage::ImageRgba8(image);
-    let resized = if source.width() > 1600 || source.height() > 1000 {
-        source.resize(1600, 1000, FilterType::Triangle)
+fn encode_screen_frame(image: &image::RgbaImage) -> Result<Vec<u8>, String> {
+    let rgb = if image.width() > SCREEN_MAX_WIDTH || image.height() > SCREEN_MAX_HEIGHT {
+        // thumbnail() is a fast area-averaging downscale (~3x faster than
+        // Triangle resize on Retina captures) and stays sharp for text.
+        // imageops::thumbnail does not keep aspect ratio, so fit it here.
+        let scale = f64::min(
+            SCREEN_MAX_WIDTH as f64 / image.width() as f64,
+            SCREEN_MAX_HEIGHT as f64 / image.height() as f64,
+        );
+        let width = ((image.width() as f64 * scale).round() as u32).max(1);
+        let height = ((image.height() as f64 * scale).round() as u32).max(1);
+        DynamicImage::ImageRgba8(image::imageops::thumbnail(image, width, height)).to_rgb8()
     } else {
-        source
+        DynamicImage::ImageRgba8(image.clone()).to_rgb8()
     };
 
-    let rgb = resized.to_rgb8();
     let mut encoded = Vec::with_capacity(256 * 1024);
-
-    JpegEncoder::new_with_quality(&mut encoded, 62)
+    JpegEncoder::new_with_quality(&mut encoded, SCREEN_JPEG_QUALITY)
         .encode(
             rgb.as_raw(),
             rgb.width(),
@@ -628,10 +707,7 @@ where
     Ok(())
 }
 
-async fn send_host_event<S>(
-    sink: &mut S,
-    event: &SequencedHostEvent,
-) -> Result<(), String>
+async fn send_host_event<S>(sink: &mut S, event: &SequencedHostEvent) -> Result<(), String>
 where
     S: futures_util::Sink<Message> + Unpin,
     S::Error: std::fmt::Display,
@@ -647,10 +723,7 @@ where
     .await
 }
 
-async fn send_json<S>(
-    sink: &mut S,
-    value: &Value,
-) -> Result<(), String>
+async fn send_json<S>(sink: &mut S, value: &Value) -> Result<(), String>
 where
     S: futures_util::Sink<Message> + Unpin,
     S::Error: std::fmt::Display,

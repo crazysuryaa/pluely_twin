@@ -2,7 +2,9 @@
 mod activate;
 mod api;
 mod capture;
+mod cursor_ghost;
 mod db;
+mod documents;
 mod remote;
 mod shortcuts;
 mod window;
@@ -83,6 +85,10 @@ pub fn run() {
             capture::start_screen_capture,
             capture::capture_selected_area,
             capture::close_overlay_window,
+            documents::extract_document_text,
+            cursor_ghost::show_cursor_ghost,
+            cursor_ghost::release_cursor_ghost,
+            cursor_ghost::hide_cursor_ghost,
             shortcuts::check_shortcuts_registered,
             shortcuts::get_registered_shortcuts,
             shortcuts::update_shortcuts,
@@ -135,6 +141,10 @@ pub fn run() {
                 let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             }
             let app_handle = app.handle();
+            #[cfg(not(target_os = "linux"))]
+            if let Err(e) = cursor_ghost::create(&app_handle) {
+                eprintln!("Failed to create cursor ghost window: {}", e);
+            }
             if app_handle.get_webview_window("dashboard").is_none() {
                 if let Err(e) = window::create_dashboard_window(&app_handle) {
                     eprintln!("Failed to pre-create dashboard window on startup: {}", e);
