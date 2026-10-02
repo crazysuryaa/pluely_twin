@@ -117,7 +117,7 @@ export const SystemAudio = (
   // const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
 
   const isVadMode = vadConfig.enabled;
-  const hasResponse = lastAIResponse || isAIProcessing;
+  const hasResponse = Boolean(lastAIResponse || isAIProcessing || remoteComments.length > 0);
 
   // Keyboard shortcut for Cmd+K to toggle view mode
   useEffect(() => {
@@ -414,14 +414,17 @@ export const SystemAudio = (
                   )}
 
                   {selectedComment && (
-                    <div className="rounded-xl border border-amber-300/20 bg-amber-300/[0.04] p-4 space-y-2">
-                      <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-amber-300">
-                        <MessageSquareIcon className="h-3 w-3" />
-                        <span>{selectedComment.device_name || "Commenter"}:</span>
+                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.04] p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase text-amber-300">
+                          <MessageSquareIcon className="h-3.5 w-3.5 text-amber-400" />
+                          <span>{selectedComment.device_name || "Twin Response"}:</span>
+                        </div>
+                        <CopyButton content={selectedComment.text} />
                       </div>
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-[#e2e4e7]">
-                        {selectedComment.text}
-                      </p>
+                      <div className="prose prose-sm max-w-none dark:prose-invert text-sm leading-relaxed text-[#e2e4e7]">
+                        <Markdown>{selectedComment.text}</Markdown>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -482,7 +485,32 @@ export const SystemAudio = (
                   ) : (
                     <>
                       {responseSource === "chat" ? (
-                        typedResponse
+                        <div className="space-y-3">
+                          {typedResponse}
+                          {remoteComments.length > 0 && (
+                            <div className="space-y-2.5 pt-3 border-t border-white/8">
+                              {remoteComments.map((comment) => (
+                                <div
+                                  key={comment.id}
+                                  className="rounded-lg border border-amber-500/30 bg-amber-500/[0.04] p-3 space-y-2"
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-1.5">
+                                      <MessageSquareIcon className="h-3.5 w-3.5 text-amber-400" />
+                                      <span className="text-[10px] font-semibold text-amber-300 uppercase tracking-wide">
+                                        {comment.device_name || "Twin Response"}
+                                      </span>
+                                    </div>
+                                    <CopyButton content={comment.text} />
+                                  </div>
+                                  <div className="prose prose-sm max-w-none dark:prose-invert text-sm leading-relaxed text-[#e2e4e7]">
+                                    <Markdown>{comment.text}</Markdown>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       ) : hasResponse ? (
                         <ResultsSection
                           lastTranscription={lastTranscription}
